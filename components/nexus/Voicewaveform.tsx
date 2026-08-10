@@ -3,13 +3,13 @@
 import { useMemo, useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import type { LiveProfile } from "./jarvisProfile";
-import type { JarvisState } from "./types";
+import type { LiveProfile } from "./nexusProfile";
+import type { NexusState } from "./types";
 
 interface VoiceWaveformProps {
   profile: React.MutableRefObject<LiveProfile>;
   audioLevel: number;
-  state: JarvisState;
+  state: NexusState;
 }
 
 const BAR_COUNT = 48;

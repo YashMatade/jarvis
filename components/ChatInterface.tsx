@@ -5,7 +5,7 @@ import { useSpeech } from "@/lib/useSpeech";
 import { useTTS } from "@/lib/useTTS";
 import { errMsg } from "@/lib/errors";
 import type { OllamaToolCall } from "@/lib/ollama";
-import JarvisSceneClient from "./jarvis/JarvisSceneClient";
+import NexusSceneClient from "./nexus/NexusSceneClient";
 import HudCardStack from "./hud/Hudcardstack";
 import { extractHudCards } from "./hud/Extracthudcards";
 import type { HudCard } from "./hud/Types";
@@ -28,7 +28,7 @@ interface ChatApiResponse {
   messages?: Msg[];
 }
 
-type JarvisState = "sleeping" | "idle" | "listening" | "thinking" | "speaking";
+type NexusState = "sleeping" | "idle" | "listening" | "thinking" | "speaking";
 
 // Finds the most recently appended assistant message with content.
 // (`Array.prototype.find` returns the FIRST match, which is wrong here —
@@ -44,7 +44,7 @@ function latestAssistantMessage(messages: Msg[] | undefined): Msg | undefined {
 }
 
 export default function ChatInterface() {
-  const [jarvisState, setJarvisState] = useState<JarvisState>("sleeping");
+  const [nexusState, setNexusState] = useState<NexusState>("sleeping");
   const [subtitle, setSubtitle] = useState("");
   const [showChat, setShowChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +57,7 @@ export default function ChatInterface() {
   const messagesRef = useRef<Msg[]>([]);
   const subtitleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stateRef = useRef<JarvisState>("sleeping");
+  const stateRef = useRef<NexusState>("sleeping");
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -65,8 +65,8 @@ export default function ChatInterface() {
   }, [messages]);
 
   useEffect(() => {
-    stateRef.current = jarvisState;
-  }, [jarvisState]);
+    stateRef.current = nexusState;
+  }, [nexusState]);
 
   // Auto-scroll the log to the newest message.
   useEffect(() => {
@@ -125,7 +125,7 @@ export default function ChatInterface() {
       history: Msg[],
       resolveToolCall?: { approved: boolean },
     ): Promise<void> => {
-      setJarvisState("thinking");
+      setNexusState("thinking");
       showSubtitle("Processing...");
 
       try {
@@ -157,7 +157,7 @@ export default function ChatInterface() {
 
         if (data.status === "needs_confirmation" && data.pendingToolCall) {
           setPending(data.pendingToolCall);
-          setJarvisState("idle");
+          setNexusState("idle");
           showSubtitle("Confirmation required. Say approve or deny.");
           return;
         }
@@ -165,25 +165,25 @@ export default function ChatInterface() {
         const assistantMsg = latestAssistantMessage(data.messages);
 
         if (assistantMsg?.content) {
-          setJarvisState("speaking");
+          setNexusState("speaking");
           showSubtitle(assistantMsg.content);
 
           await ttsSpeak(assistantMsg.content, {
             onEnd: () => {
-              setJarvisState("idle");
+              setNexusState("idle");
               showSubtitle("");
             },
             onError: () => {
-              setJarvisState("idle");
+              setNexusState("idle");
               showSubtitle("");
             },
           });
         } else {
-          setJarvisState("idle");
+          setNexusState("idle");
           showSubtitle("");
         }
       } catch (err) {
-        setJarvisState("idle");
+        setNexusState("idle");
         showSubtitle("Sorry, I encountered an error.", 2000);
         showError(errMsg(err));
       }
@@ -214,15 +214,15 @@ export default function ChatInterface() {
       if (stateRef.current === "sleeping") {
         if (
           lower.includes("wake up") ||
-          lower.includes("hey jarvis") ||
-          lower.includes("jarvis")
+          lower.includes("hey nexus") ||
+          lower.includes("nexus")
         ) {
-          setJarvisState("speaking");
+          setNexusState("speaking");
           showSubtitle("All systems online sir, what are we doing today?");
 
           await ttsSpeak("All systems online sir, what are we doing today?", {
             onEnd: () => {
-              setJarvisState("idle");
+              setNexusState("idle");
               showSubtitle("");
             },
           });
@@ -233,16 +233,16 @@ export default function ChatInterface() {
       // Sleep command
       if (
         lower.includes("go to sleep") ||
-        lower.includes("sleep jarvis") ||
+        lower.includes("sleep nexus") ||
         lower.includes("goodnight")
       ) {
         stopListening();
-        setJarvisState("speaking");
+        setNexusState("speaking");
         showSubtitle("Going to sleep mode...");
 
         await ttsSpeak("Going to sleep mode. Call me when you need me, sir.", {
           onEnd: () => {
-            setJarvisState("sleeping");
+            setNexusState("sleeping");
             showSubtitle("");
             setTimeout(() => {
               startListening(latestVoiceHandlerRef.current, (interim) => {
@@ -332,17 +332,17 @@ export default function ChatInterface() {
         <div className="flex items-center justify-between px-6 py-4">
           <div className="flex items-center gap-4">
             <h1 className="font-mono font-bold text-lg tracking-[0.4em] text-cyan">
-              J.A.R.V.I.S.
+              NEXUS
             </h1>
             <span
               className={`w-1.5 h-1.5 rounded-full ${
-                jarvisState === "sleeping"
+                nexusState === "sleeping"
                   ? "bg-cyan/20"
                   : "bg-cyan animate-pulse"
               }`}
             />
             <span className="font-mono text-[10px] text-cyan/40 tracking-[0.3em] uppercase">
-              {jarvisState === "sleeping" ? "SLEEP_MODE" : "ACTIVE"}
+              {nexusState === "sleeping" ? "SLEEP_MODE" : "ACTIVE"}
             </span>
           </div>
 
@@ -360,9 +360,9 @@ export default function ChatInterface() {
 
       {/* Main Content */}
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center">
-        {/* 3D Jarvis Scene */}
+        {/* 3D Nexus Scene */}
         <div className="w-full flex-1 relative">
-          <JarvisSceneClient state={jarvisState} audioLevel={audioLevel} />
+          <NexusSceneClient state={nexusState} audioLevel={audioLevel} />
         </div>
 
         {/* Subtitle Overlay */}
@@ -385,10 +385,10 @@ export default function ChatInterface() {
         {/* Status */}
         <div className="absolute bottom-20 left-0 right-0 flex justify-center pointer-events-none">
           <span className="font-mono text-[10px] text-cyan/40 tracking-[0.3em] uppercase">
-            {jarvisState === "sleeping" && "SAY 'WAKE UP JARVIS'"}
-            {jarvisState === "idle" && "LISTENING..."}
-            {jarvisState === "thinking" && "PROCESSING..."}
-            {jarvisState === "speaking" && "SPEAKING..."}
+            {nexusState === "sleeping" && "SAY 'WAKE UP NEXUS'"}
+            {nexusState === "idle" && "LISTENING..."}
+            {nexusState === "thinking" && "PROCESSING..."}
+            {nexusState === "speaking" && "SPEAKING..."}
           </span>
         </div>
 
@@ -427,7 +427,7 @@ export default function ChatInterface() {
                       }`}
                     >
                       <span className="text-[8px] tracking-wider opacity-50 block mb-1">
-                        {m.role === "user" ? "[ YOU ]" : "[ J.A.R.V.I.S. ]"}
+                        {m.role === "user" ? "[ YOU ]" : "[ NEXUS ]"}
                       </span>
                       {m.content}
                     </div>
@@ -464,7 +464,7 @@ export default function ChatInterface() {
       {/* Footer */}
       <footer className="relative z-10 border-t border-cyan/20 bg-black/40 backdrop-blur-sm px-6 py-2">
         <div className="flex justify-between items-center font-mono text-[9px] text-cyan/30 tracking-wider">
-          <span>SYS: {jarvisState.toUpperCase()}</span>
+          <span>SYS: {nexusState.toUpperCase()}</span>
           <span>VOICE: {listening ? "ACTIVE" : "STANDBY"}</span>
         </div>
       </footer>

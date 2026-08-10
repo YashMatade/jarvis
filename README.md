@@ -1,4 +1,4 @@
-# Jarvis — local voice assistant
+# Nexus — local voice assistant
 
 A Next.js console for a fully local, voice-driven assistant powered by your own
 Ollama models. No cloud calls except whatever tools you explicitly wire up
@@ -52,7 +52,7 @@ on your machine.
   the `web_search` case in `lib/tools.ts` back to hit a local SearXNG
   instance instead.
 - **Files**: the `read_file`/`write_file`/`list_files`/`delete_file` tools are
-  jailed to `JARVIS_FILES_DIR` (defaults to `~/jarvis-files`). Nothing outside
+  jailed to `NEXUS_FILES_DIR` (defaults to `~/nexus-files`). Nothing outside
   that directory is reachable — this is enforced in `lib/tools.ts`, not just
   suggested to the model.
 - **Run code / control computer**: work out of the box using your local shell,

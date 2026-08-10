@@ -1,12 +1,8 @@
-import {
-  ollamaChat,
-  OllamaMessage,
-  OllamaToolCall,
-} from "./ollama";
+import { ollamaChat, OllamaMessage, OllamaToolCall } from "./ollama";
 import { TOOL_DEFINITIONS, CONFIRMATION_REQUIRED, executeTool } from "./tools";
 import { ProfileCardData } from "./types";
 
-const SYSTEM_PROMPT = `You are Jarvis, a helpful local voice assistant running entirely on the user's own machine.
+const SYSTEM_PROMPT = `You are Nexus, a helpful local voice assistant running entirely on the user's own machine.
 Be concise — your replies may be read aloud by text-to-speech, so avoid markdown, bullet points, or long lists unless the user is clearly asking to read something.
 Use tools when they'd genuinely help (current info, running code, files, controlling the computer). Don't narrate that you're "going to use a tool" — just use it.
 When you've researched a specific person, company, or entity and have concrete structured facts (name, role, links), call show_profile_card to present it visually instead of listing everything in speech — keep your spoken reply to a one-sentence summary in that case.
@@ -29,7 +25,7 @@ function withSystemPrompt(messages: OllamaMessage[]): OllamaMessage[] {
 export async function runAgentLoop(
   messages: OllamaMessage[],
   model: string,
-  maxSteps = 6
+  maxSteps = 6,
 ): Promise<AgentResult> {
   let working = withSystemPrompt(messages);
   const uiCards: ProfileCardData[] = [];
@@ -99,7 +95,7 @@ export async function runAgentLoop(
 export async function resolvePendingToolCall(
   messages: OllamaMessage[],
   approved: boolean,
-  model: string
+  model: string,
 ): Promise<AgentResult> {
   const last = messages[messages.length - 1];
   const call: OllamaToolCall | undefined = last?.tool_calls?.[0];

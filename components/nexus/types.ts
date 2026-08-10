@@ -1,19 +1,19 @@
-export type JarvisState =
+export type NexusState =
   | "sleeping"
   | "idle"
   | "listening"
   | "thinking"
   | "speaking";
 
-export interface JarvisSceneProps {
-  state?: JarvisState;
+export interface NexusSceneProps {
+  state?: NexusState;
   audioLevel?: number;
   className?: string;
   /** ms for state-to-state visual transitions. Defaults to 900. */
   transitionMs?: number;
 }
 
-export interface JarvisThemeColors {
+export interface NexusThemeColors {
   primary: string; // dominant glow / rim color
   secondary: string; // deep fill color
   accent: string; // hot highlight color (sparks, spikes, waveform peaks)
@@ -21,7 +21,7 @@ export interface JarvisThemeColors {
   background: string;
 }
 
-export interface JarvisProfile {
+export interface NexusProfile {
   energy: number;
   coreIntensity: number;
   particleSpeed: number;
@@ -29,10 +29,10 @@ export interface JarvisProfile {
   streamActivity: number;
   /** 0 = calm/steady, 1 = jittery/glitchy (used by thinking state) */
   instability: number;
-  colors: JarvisThemeColors;
+  colors: NexusThemeColors;
 }
 
-export const STATE_PROFILE: Record<JarvisState, JarvisProfile> = {
+export const STATE_PROFILE: Record<NexusState, NexusProfile> = {
   sleeping: {
     energy: 0.08,
     coreIntensity: 0.15,

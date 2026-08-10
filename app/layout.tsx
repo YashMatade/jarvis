@@ -15,7 +15,7 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "JARVIS — local console",
+  title: "NEXUS — local console",
   description: "A fully local voice assistant running on your own models.",
 };
 

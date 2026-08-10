@@ -10,28 +10,28 @@ import {
   ChromaticAberration,
 } from "@react-three/postprocessing";
 import * as THREE from "three";
-import JarvisCore from "./JarvisCore";
+import NexusCore from "./NexusCore";
 import DataParticles from "./DataParticles";
-import JarvisEnvironment from "./JarvisEnvironment";
-import { JarvisSceneProps } from "./types";
-import { useJarvisProfile } from "./jarvisProfile";
+import NexusEnvironment from "./NexusEnvironment";
+import { NexusSceneProps } from "./types";
+import { useNexusProfile } from "./nexusProfile";
 
-function JarvisSceneContents({
+function NexusSceneContents({
   state = "idle",
   audioLevel = 0,
   transitionMs = 900,
-}: JarvisSceneProps) {
+}: NexusSceneProps) {
   // A single smoothly-interpolated profile shared by every part of the
   // scene, so the core, particles, environment, and post-processing all
   // transition together instead of snapping independently.
-  const profile = useJarvisProfile(state, transitionMs);
+  const profile = useNexusProfile(state, transitionMs);
 
   return (
     <>
-      <JarvisEnvironment profile={profile} />
+      <NexusEnvironment profile={profile} />
 
       <Suspense fallback={null}>
-        <JarvisCore state={state} audioLevel={audioLevel} profile={profile} />
+        <NexusCore state={state} audioLevel={audioLevel} profile={profile} />
         <DataParticles profile={profile} state={state} count={400} />
       </Suspense>
 
@@ -67,12 +67,12 @@ function JarvisSceneContents({
   );
 }
 
-export default function JarvisScene({
+export default function NexusScene({
   state = "idle",
   audioLevel = 0,
   className,
   transitionMs = 900,
-}: JarvisSceneProps) {
+}: NexusSceneProps) {
   return (
     <div className={className ?? "absolute inset-0"}>
       <Canvas
@@ -89,7 +89,7 @@ export default function JarvisScene({
       >
         <PerspectiveCamera makeDefault position={[0, 0.2, 3.8]} fov={42} />
         <AdaptiveDpr pixelated={false} />
-        <JarvisSceneContents
+        <NexusSceneContents
           state={state}
           audioLevel={audioLevel}
           transitionMs={transitionMs}

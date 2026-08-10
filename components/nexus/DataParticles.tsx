@@ -3,12 +3,12 @@
 import { useMemo, useRef, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import type { LiveProfile } from "./jarvisProfile";
-import type { JarvisState } from "./types";
+import type { LiveProfile } from "./nexusProfile";
+import type { NexusState } from "./types";
 
 interface DataParticlesProps {
   profile: React.MutableRefObject<LiveProfile>;
-  state: JarvisState;
+  state: NexusState;
   count?: number;
 }
 
@@ -20,7 +20,7 @@ export default function DataParticles({
   const pointsRef = useRef<THREE.Points>(null);
   const velocitiesRef = useRef<Float32Array | null>(null);
   const burstRef = useRef(0);
-  const prevStateRef = useRef<JarvisState>(state);
+  const prevStateRef = useRef<NexusState>(state);
 
   const { material, geometry } = useMemo(() => {
     const pos = new Float32Array(count * 3);

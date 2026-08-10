@@ -9,20 +9,20 @@ import EnergyStreams from "./EnergyStreams";
 import HexFragments from "./HexFragments";
 import HolographicGrid from "./HolographicGrid";
 import VoiceWaveform from "./Voicewaveform";
-import { JarvisState } from "./types";
-import type { LiveProfile } from "./jarvisProfile";
+import { NexusState } from "./types";
+import type { LiveProfile } from "./nexusProfile";
 
-interface JarvisCoreProps {
-  state: JarvisState;
+interface NexusCoreProps {
+  state: NexusState;
   audioLevel: number;
   profile: React.MutableRefObject<LiveProfile>;
 }
 
-export default function JarvisCore({
+export default function NexusCore({
   state,
   audioLevel,
   profile,
-}: JarvisCoreProps) {
+}: NexusCoreProps) {
   const sphereRef = useRef<THREE.Group>(null);
 
   // Create materials ONCE with useMemo

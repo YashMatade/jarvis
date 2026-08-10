@@ -35,7 +35,7 @@ async def main():
     
     print(f"Text to speak ({len(text)} chars): {text[:100]}...", file=sys.stderr)
     
-    # Edge TTS with British male voice (JARVIS-like)
+    # Edge TTS with British male voice (NEXUS-like)
     # Available British voices:
     # en-GB-RyanNeural, en-GB-ThomasNeural, en-GB-SoniaNeural
     # en-GB-LibbyNeural, en-GB-MaisieNeural, en-GB-OliverNeural

@@ -13,9 +13,9 @@ const exec = promisify(execCb);
 // ---------------------------------------------------------------------------
 
 // Everything the "files" tool touches is jailed to this directory.
-// Change via .env.local: JARVIS_FILES_DIR=/absolute/path
+// Change via .env.local: NEXUS_FILES_DIR=/absolute/path
 const FILES_ROOT = path.resolve(
-  process.env.JARVIS_FILES_DIR || path.join(os.homedir(), "jarvis-files")
+  process.env.NEXUS_FILES_DIR || path.join(os.homedir(), "nexus-files")
 );
 
 // Hosted web search via Tavily (https://tavily.com) — built for LLM agent
@@ -90,7 +90,7 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
         properties: {
           filename: {
             type: "string",
-            description: "Path relative to the jarvis-files directory",
+            description: "Path relative to the nexus-files directory",
           },
         },
         required: ["filename"],
@@ -107,7 +107,7 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
         properties: {
           filename: {
             type: "string",
-            description: "Path relative to the jarvis-files directory",
+            description: "Path relative to the nexus-files directory",
           },
           content: { type: "string", description: "Content to write" },
         },
@@ -141,7 +141,7 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
         properties: {
           filename: {
             type: "string",
-            description: "Path relative to the jarvis-files directory",
+            description: "Path relative to the nexus-files directory",
           },
         },
         required: ["filename"],
@@ -228,7 +228,7 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
 function resolveInRoot(filename: string): string {
   const resolved = path.resolve(FILES_ROOT, filename);
   if (!resolved.startsWith(FILES_ROOT)) {
-    throw new Error("Path escapes the allowed jarvis-files directory.");
+    throw new Error("Path escapes the allowed nexus-files directory.");
   }
   return resolved;
 }
