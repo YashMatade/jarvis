@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+@keyframes listeningPulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+.listening-indicator {
+  animation: listeningPulse 2s ease-in-out infinite;
+}
+
+@keyframes confidenceBar {
+  0% {
+    width: 0%;
+  }
+  100% {
+    width: var(--confidence);
+  }
+}
+
+.confidence-bar {
+  animation: confidenceBar 0.5s ease-out;
+}
+
+:root {
+  --void: #050809;
+  --panel: #0b1114;
+  --panel-line: #16232a;
+  --cyan: #4fd8e8;
+  --cyan-dim: #1f5b63;
+  --amber: #e8a84f;
+  --amber-dim: #6b4f22;
+  --ink: #cfe8ed;
+  --ink-dim: #6f8a90;
+  --danger: #e85f4f;
+}
+
+@theme inline {
+  --color-void: var(--void);
+  --color-panel: var(--panel);
+  --color-panel-line: var(--panel-line);
+  --color-cyan: var(--cyan);
+  --color-cyan-dim: var(--cyan-dim);
+  --color-amber: var(--amber);
+  --color-amber-dim: var(--amber-dim);
+  --color-ink: var(--ink);
+  --color-ink-dim: var(--ink-dim);
+  --color-danger: var(--danger);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono-tech);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(
+      ellipse 80% 50% at 50% -10%,
+      rgba(79, 216, 232, 0.08),
+      transparent
+    ),
+    var(--void);
+  color: var(--ink);
+  font-family: var(--font-mono-tech), ui-monospace, monospace;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--cyan-dim);
+  color: var(--ink);
+}
+
+/* faint circuit grid backdrop */
+.grid-backdrop {
+  background-image:
+    linear-gradient(to right, var(--panel-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--panel-line) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(
+    ellipse 70% 70% at 50% 30%,
+    black 40%,
+    transparent 90%
+  );
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.7;
+  }
+  70% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
+}
+
+@keyframes scan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+.animate-scan {
+  animation: scan 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-ring,
+  .animate-scan {
+    animation: none;
+  }
+}
