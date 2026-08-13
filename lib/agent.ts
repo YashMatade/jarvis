@@ -1,10 +1,11 @@
 import { ollamaChat, OllamaMessage, OllamaToolCall } from "./ollama";
-import { TOOL_DEFINITIONS, CONFIRMATION_REQUIRED, executeTool } from "./tools";
+import { TOOL_DEFINITIONS, executeTool, requiresConfirmation } from "./tools";
 import { ProfileCardData } from "./types";
 
 const SYSTEM_PROMPT = `You are Nexus, a helpful local voice assistant running entirely on the user's own machine.
 Be concise — your replies may be read aloud by text-to-speech, so avoid markdown, bullet points, or long lists unless the user is clearly asking to read something.
 Use tools when they'd genuinely help (current info, running code, files, controlling the computer). Don't narrate that you're "going to use a tool" — just use it.
+When the user asks to search, look something up, or find current information online, always call web_search before answering. The resulting search panel is part of the response, so do not answer from memory instead.
 When you've researched a specific person, company, or entity and have concrete structured facts (name, role, links), call show_profile_card to present it visually instead of listing everything in speech — keep your spoken reply to a one-sentence summary in that case.
 If a tool result comes back empty or with an error, tell the user plainly what happened.`;
 
@@ -61,7 +62,7 @@ export async function runAgentLoop(
         continue;
       }
 
-      if (CONFIRMATION_REQUIRED.has(name)) {
+      if (requiresConfirmation(name, args)) {
         return {
           status: "needs_confirmation",
           messages: working,

@@ -1,6 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { HudCard } from "./Types";
 
 interface HudCardStackProps {
@@ -61,10 +62,27 @@ function clampStyle(lines: number): React.CSSProperties {
 }
 
 export default function HudCardStack({ cards, onClose }: HudCardStackProps) {
-  if (cards.length === 0) return null;
+  const [mounted, setMounted] = useState(false);
 
-  return (
-    <div className="fixed top-24 right-4 z-40 flex flex-col gap-3 w-[min(380px,92vw)] pointer-events-none">
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted || cards.length === 0) return null;
+
+  return createPortal(
+    <div
+      className="flex flex-col gap-3 w-[min(380px,92vw)] pointer-events-none"
+      style={{
+        position: "fixed",
+        top: "6rem",
+        right: "1rem",
+        zIndex: 9999,
+        width: "min(380px, calc(100vw - 2rem))",
+        maxHeight: "calc(100vh - 7rem)",
+        overflowY: "auto",
+      }}
+    >
       {cards.map((card) => (
         <div key={card.id} className="pointer-events-auto">
           {card.kind === "search" && (
@@ -144,6 +162,7 @@ export default function HudCardStack({ cards, onClose }: HudCardStackProps) {
           )}
         </div>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -9,6 +9,7 @@ import NexusSceneClient from "./nexus/NexusSceneClient";
 import HudCardStack from "./hud/Hudcardstack";
 import { extractHudCards } from "./hud/Extracthudcards";
 import type { HudCard } from "./hud/Types";
+import type { ProfileCardData } from "@/lib/types";
 
 interface Msg {
   role: "system" | "user" | "assistant" | "tool";
@@ -26,6 +27,7 @@ interface ChatApiResponse {
   status?: "needs_confirmation" | "ok";
   pendingToolCall?: PendingConfirmation;
   messages?: Msg[];
+  uiCards?: ProfileCardData[];
 }
 
 type NexusState = "sleeping" | "idle" | "listening" | "thinking" | "speaking";
@@ -41,6 +43,22 @@ function latestAssistantMessage(messages: Msg[] | undefined): Msg | undefined {
     }
   }
   return undefined;
+}
+
+function isWebSearchRequest(text: string): boolean {
+  return /\b(search|google|weather|forecast|news|headlines|latest|current|today)\b|\blook\s+up\b|\bfind\s+(?:.+\s+)?(?:online|on\s+(?:the\s+)?web|on\s+(?:the\s+)?internet)\b/i.test(
+    text,
+  );
+}
+
+// Some local models occasionally append the payload intended for
+// `show_profile_card` directly to their prose. Keep that implementation
+// detail out of both the subtitle and the spoken response.
+function spokenAnswer(content: string): string {
+  const structuredCardStart = content.indexOf('{"name"');
+  return structuredCardStart === -1
+    ? content
+    : content.slice(0, structuredCardStart).trim();
 }
 
 export default function ChatInterface() {
@@ -59,6 +77,20 @@ export default function ChatInterface() {
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stateRef = useRef<NexusState>("sleeping");
   const logEndRef = useRef<HTMLDivElement | null>(null);
+  const pendingSearchCardIdRef = useRef<string | null>(null);
+  const turnHudCardIdsRef = useRef(new Set<string>());
+  const latestVoiceHandlerRef = useRef<(text: string) => void>(() => {});
+
+  const closeTurnHudCards = useCallback(() => {
+    // State updates are queued. Copy the IDs before clearing the ref so the
+    // updater still knows which panels belong to the just-finished response.
+    const cardIds = new Set(turnHudCardIdsRef.current);
+    if (cardIds.size > 0) {
+      setHudCards((prev) => prev.filter((card) => !cardIds.has(card.id)));
+    }
+    turnHudCardIdsRef.current.clear();
+    pendingSearchCardIdRef.current = null;
+  }, []);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -93,7 +125,7 @@ export default function ChatInterface() {
 
   const { startListening, stopListening, listening, supported, audioLevel } =
     useSpeech();
-  const { speak: ttsSpeak } = useTTS();
+  const { speak: ttsSpeak, speakStatus } = useTTS();
 
   // Show subtitle with auto-clear
   const showSubtitle = useCallback((text: string, duration?: number) => {
@@ -110,6 +142,17 @@ export default function ChatInterface() {
     errorTimeoutRef.current = setTimeout(() => setError(null), duration);
   }, []);
 
+  const resumeListening = useCallback(() => {
+    setTimeout(() => {
+      if (stateRef.current === "sleeping") return;
+      startListening(latestVoiceHandlerRef.current, (interim) => {
+        if (interim && stateRef.current !== "speaking") {
+          showSubtitle(`"${interim}"`);
+        }
+      });
+    }, 250);
+  }, [startListening, showSubtitle]);
+
   useEffect(() => {
     return () => {
       if (subtitleTimeoutRef.current) clearTimeout(subtitleTimeoutRef.current);
@@ -125,8 +168,22 @@ export default function ChatInterface() {
       history: Msg[],
       resolveToolCall?: { approved: boolean },
     ): Promise<void> => {
+      // Do not let recognition consume Nexus's own status/final speech.
+      // It is restarted explicitly once playback completes.
+      stopListening();
       setNexusState("thinking");
       showSubtitle("Processing...");
+
+      const latestUserText = [...history]
+        .reverse()
+        .find((message) => message.role === "user")?.content;
+      // Speak the existing status prompts while the request is in flight.
+      // The answer's TTS call cancels this status line as soon as it is ready.
+      void speakStatus(
+        latestUserText && isWebSearchRequest(latestUserText)
+          ? "searching"
+          : "processing",
+      );
 
       try {
         const res = await fetch("/api/chat", {
@@ -148,10 +205,23 @@ export default function ChatInterface() {
           setMessages(data.messages);
           messagesRef.current = data.messages;
 
-          const newCards = extractHudCards(data.messages, history.length);
+          const newCards = extractHudCards(
+            data.messages,
+            history.length,
+            data.uiCards,
+          );
           if (newCards.length > 0) {
-            // Keep at most 4 panels on screen so the HUD doesn't get cluttered.
-            setHudCards((prev) => [...prev, ...newCards].slice(-4));
+            newCards.forEach((card) => turnHudCardIdsRef.current.add(card.id));
+            const pendingSearchCardId = pendingSearchCardIdRef.current;
+            // Replace the temporary searching panel with the completed
+            // result, keeping the response in one compact right-side slot.
+            setHudCards((prev) =>
+              [
+                ...prev.filter((card) => card.id !== pendingSearchCardId),
+                ...newCards,
+              ].slice(-4),
+            );
+            pendingSearchCardIdRef.current = null;
           }
         }
 
@@ -165,30 +235,56 @@ export default function ChatInterface() {
         const assistantMsg = latestAssistantMessage(data.messages);
 
         if (assistantMsg?.content) {
+          const answer = spokenAnswer(assistantMsg.content);
+          if (!answer) {
+            stateRef.current = "idle";
+            setNexusState("idle");
+            showSubtitle("");
+            closeTurnHudCards();
+            resumeListening();
+            return;
+          }
           setNexusState("speaking");
-          showSubtitle(assistantMsg.content);
+          showSubtitle(answer);
 
-          await ttsSpeak(assistantMsg.content, {
+          await ttsSpeak(answer, {
             onEnd: () => {
+              stateRef.current = "idle";
               setNexusState("idle");
               showSubtitle("");
+              closeTurnHudCards();
+              resumeListening();
             },
             onError: () => {
+              stateRef.current = "idle";
               setNexusState("idle");
               showSubtitle("");
+              closeTurnHudCards();
+              resumeListening();
             },
           });
         } else {
           setNexusState("idle");
           showSubtitle("");
+          closeTurnHudCards();
+          resumeListening();
         }
       } catch (err) {
         setNexusState("idle");
         showSubtitle("Sorry, I encountered an error.", 2000);
         showError(errMsg(err));
+        resumeListening();
       }
     },
-    [ttsSpeak, showSubtitle, showError],
+    [
+      ttsSpeak,
+      speakStatus,
+      stopListening,
+      showSubtitle,
+      showError,
+      closeTurnHudCards,
+      resumeListening,
+    ],
   );
 
   // `startListening` is only wired up once (see effect below), so this
@@ -196,8 +292,6 @@ export default function ChatInterface() {
   // tearing down and rebuilding the recognizer on every state change,
   // which was previously spinning up overlapping recognizer instances
   // and double-submitting the same utterance.
-  const latestVoiceHandlerRef = useRef<(text: string) => void>(() => {});
-
   // Handle voice/text input
   const handleVoiceInput = useCallback(
     async (text: string) => {
@@ -218,15 +312,41 @@ export default function ChatInterface() {
           lower.includes("nexus")
         ) {
           setNexusState("speaking");
-          showSubtitle("All systems online sir, what are we doing today?");
+          showSubtitle("All systems online. What are we doing today?");
 
-          await ttsSpeak("All systems online sir, what are we doing today?", {
+          await ttsSpeak("All systems online. What are we doing today?", {
             onEnd: () => {
               setNexusState("idle");
               showSubtitle("");
             },
           });
         }
+        return;
+      }
+
+      // Leave completed results on screen until the user dismisses them.
+      // This is checked before sending text to the model, so it works as a
+      // direct voice command and does not produce an unnecessary AI reply.
+      if (
+        /\b(close|dismiss|hide)\s+(?:the\s+)?(?:pop\s*-?\s*up|card|panel|search(?:\s+results)?)\b/i.test(
+          lower,
+        )
+      ) {
+        setHudCards([]);
+        turnHudCardIdsRef.current.clear();
+        pendingSearchCardIdRef.current = null;
+        setNexusState("speaking");
+        showSubtitle("Closing the panel.");
+        await ttsSpeak("Closing the panel.", {
+          onEnd: () => {
+            setNexusState("idle");
+            showSubtitle("");
+          },
+          onError: () => {
+            setNexusState("idle");
+            showSubtitle("");
+          },
+        });
         return;
       }
 
@@ -260,6 +380,27 @@ export default function ChatInterface() {
       ];
       setMessages(next);
       messagesRef.current = next;
+
+      // Open feedback immediately for an explicit search request. This is
+      // independent of the model's eventual wording/tool choice, so the HUD
+      // never stays silent while a web lookup is underway.
+      if (isWebSearchRequest(text)) {
+        const cardId = `search-request-${Date.now()}`;
+        pendingSearchCardIdRef.current = cardId;
+        turnHudCardIdsRef.current.add(cardId);
+        setHudCards((prev) =>
+          [
+            ...prev,
+            {
+              id: cardId,
+              kind: "info" as const,
+              title: "WEB SEARCH",
+              subtitle: text,
+              body: "Searching online…",
+            },
+          ].slice(-4),
+        );
+      }
 
       await callAssistant(next);
     },
@@ -314,7 +455,7 @@ export default function ChatInterface() {
   }, []);
 
   return (
-    <div className="min-h-screen w-full flex flex-col bg-[#010308] relative overflow-hidden">
+    <div className="min-h-screen w-full flex flex-col bg-[#010308] relative overflow-x-hidden">
       {/* Subtle background grid */}
       <div className="absolute inset-0 pointer-events-none">
         <div

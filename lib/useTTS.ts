@@ -9,7 +9,7 @@ interface TTSOptions {
 }
 
 const STATUS_RESPONSES = {
-  waking: "All systems online sir, what are we doing today?",
+  waking: "All systems online. What are we doing today?",
   sleeping: "Going to sleep mode. Call me when you need me.",
   searching: "Searching for the information sir.",
   processing: "Processing your request, just a moment.",

@@ -1,9 +1,6 @@
 import type { HudCard, HudMessage } from "./Types";
+import type { ProfileCardData } from "@/lib/types";
 
-// Domains known to send X-Frame-Options / CSP headers that block iframe
-// embedding outright. For these we skip straight to a "launch" card
-// instead of showing a permanently blank frame. Not exhaustive — treat
-// it as a best-effort allowlist-of-exceptions, not a security boundary.
 const FRAME_BLOCKED_DOMAINS = [
   "youtube.com",
   "google.com",
@@ -132,9 +129,29 @@ function nextId() {
 export function extractHudCards(
   messages: HudMessage[],
   previousLength: number,
+  profileCards: ProfileCardData[] = [],
 ): HudCard[] {
   const cards: HudCard[] = [];
   const newMessages = messages.slice(previousLength);
+
+  // `show_profile_card` is intentionally handled on the server and is not
+  // always emitted as a normal tool-result message. Convert that explicit UI
+  // payload here so it cannot be lost before reaching the HUD.
+  for (const profile of profileCards) {
+    const facts = (profile.fields || [])
+      .map((field) => `${field.label}: ${field.value}`)
+      .join("\n");
+    const links = (profile.links || [])
+      .map((link) => `${link.label}: ${link.url}`)
+      .join("\n");
+    cards.push({
+      id: nextId(),
+      kind: "info",
+      title: profile.name,
+      subtitle: profile.subtitle,
+      body: [profile.summary, facts, links].filter(Boolean).join("\n\n"),
+    });
+  }
 
   if (typeof window !== "undefined") {
     // Temporary diagnostic — remove once card detection is confirmed
@@ -151,6 +168,10 @@ export function extractHudCards(
     const args = toolArgsFor(messages, i, toolName);
     const parsed = safeParseJson(m.content);
     const contentStr = contentAsString(m.content);
+
+    // The server passes this tool's structured payload separately as
+    // `profileCards` above. Do not add a second generic "Card shown" panel.
+    if (toolName === "show_profile_card") continue;
 
     // --- Search-style tool ---
     if (/search/i.test(toolName)) {

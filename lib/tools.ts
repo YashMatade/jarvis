@@ -37,8 +37,16 @@ export const CONFIRMATION_REQUIRED = new Set([
   "run_code",
   "write_file",
   "delete_file",
-  "control_computer",
 ]);
+
+// Browser links and desktop app launches are explicit user-facing requests,
+// so both can happen immediately when the assistant invokes this tool.
+export function requiresConfirmation(
+  name: string,
+  _args: Record<string, unknown>,
+): boolean {
+  return CONFIRMATION_REQUIRED.has(name);
+}
 
 // ---------------------------------------------------------------------------
 // Tool schema (sent to Ollama so the model knows what it can call)
@@ -153,13 +161,13 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
     function: {
       name: "control_computer",
       description:
-        "Open an application, or run an OS-level automation action (e.g. open a URL, launch an app). Requires user confirmation. Platform-specific: uses `open`/osascript on macOS, PowerShell on Windows, xdg-open on Linux.",
+        "Open an application, or open a URL in the user's default web browser. These direct user-facing actions happen immediately. Platform-specific: uses `open`/osascript on macOS, PowerShell on Windows, xdg-open on Linux.",
       parameters: {
         type: "object",
         properties: {
           action: {
             type: "string",
-            enum: ["open_app", "open_url"],
+            enum: ["open_app", "open_application", "open_url"],
             description: "What kind of action to perform",
           },
           target: {
@@ -262,11 +270,19 @@ export async function executeTool(
           throw new Error(`Tavily returned ${res.status}: ${body || res.statusText}`);
         }
         const data: { results?: TavilyResult[]; answer?: string } = await res.json();
-        const resultLines = (data.results || [])
-          .map((r) => `- ${r.title}: ${r.url}\n  ${r.content || ""}`)
-          .join("\n");
-        const summary = data.answer ? `${data.answer}\n\n` : "";
-        return summary + (resultLines || "No results found.");
+        // Keep the tool response structured. Besides giving the model cleaner
+        // context, this is the payload the client uses to render its search
+        // popup. The prior bullet-list format discarded the result boundaries,
+        // so the UI could only render a generic text panel.
+        return JSON.stringify({
+          query,
+          answer: data.answer,
+          results: (data.results || []).map((result) => ({
+            title: result.title,
+            url: result.url,
+            snippet: result.content || "",
+          })),
+        });
       } catch (err) {
         return `Web search failed: ${errMsg(err)}`;
       }
@@ -349,7 +365,7 @@ export async function executeTool(
           await exec(`${opener} ${JSON.stringify(target)}`);
           return `Opened URL: ${target}`;
         }
-        if (action === "open_app") {
+        if (action === "open_app" || action === "open_application") {
           if (platform === "darwin") {
             await exec(`open -a ${JSON.stringify(target)}`);
           } else if (platform === "win32") {
