@@ -1,87 +1,96 @@
 import { NextResponse } from "next/server";
-import { exec } from "child_process";
-import { promisify } from "util";
-import { writeFile, readFile, unlink, mkdir } from "fs/promises";
+import { spawn } from "child_process";
 import path from "path";
-import { existsSync } from "fs";
+import crypto from "crypto";
 
-const execAsync = promisify(exec);
+// Simple in-memory cache. Resets on server restart / cold start.
+// Swap for Redis or an LRU package if you need it to persist or bound memory.
+const cache = new Map<string, Buffer>();
+const MAX_CACHE_ENTRIES = 100;
 
 export async function POST(request: Request) {
   try {
-    const { text } = await request.json();
+    const { text, voice } = await request.json();
 
     if (!text || typeof text !== "string") {
       return NextResponse.json({ error: "Text is required" }, { status: 400 });
     }
 
-    // Sanitize text to prevent command injection
-    const sanitizedText = text.replace(/['"`$\\!&|;<>*?{}[\]()]/g, "");
-
-    const timestamp = Date.now();
-    const tmpDir = path.join(process.cwd(), "tmp");
-    const textFile = path.join(tmpDir, `input_${timestamp}.txt`);
-    const audioFile = path.join(tmpDir, `output_${timestamp}.mp3`);
-
-    // Ensure tmp directory exists
-    if (!existsSync(tmpDir)) {
-      await mkdir(tmpDir, { recursive: true });
+    if (text.length > 5000) {
+      return NextResponse.json(
+        { error: "Text too long (max 5000 chars)" },
+        { status: 400 },
+      );
     }
 
-    // Write text to temporary file
-    await writeFile(textFile, sanitizedText, "utf-8");
+    const selectedVoice = voice || "en-GB-RyanNeural";
+    const cacheKey = crypto
+      .createHash("sha256")
+      .update(text + selectedVoice)
+      .digest("hex");
 
-    console.log(
-      `Generating speech for text: "${sanitizedText.substring(0, 50)}..."`,
-    );
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return new NextResponse(new Uint8Array(cached), {
+        headers: {
+          "Content-Type": "audio/mpeg",
+          "Content-Length": cached.byteLength.toString(),
+          "Cache-Control": "public, max-age=86400",
+        },
+      });
+    }
 
-    // Call Python script
     const pythonScript = path.join(process.cwd(), "scripts", "tts_edge.py");
 
-    try {
-      const { stdout, stderr } = await execAsync(
-        `python3 "${pythonScript}" "${textFile}" "${audioFile}"`,
-        { timeout: 30000 }, // 30 second timeout
-      );
+    const audioBuffer = await new Promise<Buffer>((resolve, reject) => {
+      const child = spawn("python3", [pythonScript, selectedVoice]);
+      const chunks: Buffer[] = [];
+      let stderr = "";
 
-      if (stderr) {
-        console.warn("Python stderr:", stderr);
-      }
-      console.log("Python stdout:", stdout);
-    } catch (execError: any) {
-      console.error("Python execution error:", execError);
-      throw new Error(`TTS generation failed: ${execError.message}`);
+      const timeout = setTimeout(() => {
+        child.kill();
+        reject(new Error("TTS generation timed out"));
+      }, 30000);
+
+      child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+      child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+
+      child.on("close", (code) => {
+        clearTimeout(timeout);
+        if (code !== 0) {
+          reject(new Error(`TTS script exited with code ${code}: ${stderr}`));
+          return;
+        }
+        if (chunks.length === 0) {
+          reject(new Error("No audio produced"));
+          return;
+        }
+        resolve(Buffer.concat(chunks));
+      });
+
+      child.on("error", (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
+
+      child.stdin.write(text, "utf-8");
+      child.stdin.end();
+    });
+
+    // Basic cache eviction so this can't grow unbounded
+    if (cache.size >= MAX_CACHE_ENTRIES) {
+      const oldestKey = cache.keys().next().value;
+      if (oldestKey) cache.delete(oldestKey);
     }
+    cache.set(cacheKey, audioBuffer);
 
-    // Check if audio file was created
-    if (!existsSync(audioFile)) {
-      throw new Error("Audio file was not generated");
-    }
+    console.log(`Generated audio: ${audioBuffer.length} bytes`);
 
-    // Read the generated audio file
-    const audioBuffer = await readFile(audioFile);
-
-    if (audioBuffer.length === 0) {
-      throw new Error("Generated audio file is empty");
-    }
-
-    // Cleanup temporary files
-    Promise.all([
-      unlink(textFile).catch((err) =>
-        console.warn("Failed to delete text file:", err),
-      ),
-      unlink(audioFile).catch((err) =>
-        console.warn("Failed to delete audio file:", err),
-      ),
-    ]);
-
-    console.log(`Successfully generated audio: ${audioBuffer.length} bytes`);
-
-    return new NextResponse(audioBuffer, {
+    return new NextResponse(new Uint8Array(audioBuffer), {
       headers: {
         "Content-Type": "audio/mpeg",
         "Content-Length": audioBuffer.byteLength.toString(),
-        "Cache-Control": "no-cache",
+        "Cache-Control": "public, max-age=86400",
       },
     });
   } catch (error: any) {
