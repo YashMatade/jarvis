@@ -23,6 +23,12 @@ interface PendingConfirmation {
   arguments: Record<string, unknown>;
 }
 
+interface MovieLocationPrompt {
+  text: string;
+  detectedLocation: string;
+  phase: "confirm" | "awaiting_city";
+}
+
 interface ChatApiResponse {
   status?: "needs_confirmation" | "ok";
   pendingToolCall?: PendingConfirmation;
@@ -51,19 +57,90 @@ function isWebSearchRequest(text: string): boolean {
   );
 }
 
-// Some local models occasionally append the payload intended for
-// `show_profile_card` directly to their prose. Keep that implementation
-// detail out of both the subtitle and the spoken response.
-function spokenAnswer(content: string): string {
+function isMovieRequest(text: string): boolean {
+  return /\b(movie|movies|cinema|showtimes?|film|ticket)s?\b/i.test(text);
+}
+
+function isSearchRequest(text: string): boolean {
+  return isWebSearchRequest(text) || isMovieRequest(text);
+}
+
+function getCurrentCoordinates(): Promise<string | null> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        resolve(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+      },
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+    );
+  });
+}
+
+async function resolveMovieLocation(): Promise<string> {
+  const coordinates = await getCurrentCoordinates();
+  if (!coordinates) return "";
+
+  try {
+    const response = await fetch("/api/location", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ coordinates }),
+    });
+    if (response.ok) {
+      const data: { location?: string } = await response.json();
+      if (data.location) return data.location;
+    }
+  } catch {
+    // The coordinates remain a usable fallback if place-name lookup fails.
+  }
+
+  return coordinates;
+}
+
+// Keep UI formatting, URLs, and Markdown syntax out of the TTS payload. The
+// chat log still retains the original response for reference.
+function spokenAnswer(content: string, concise = false): string {
   const structuredCardStart = content.indexOf('{"name"');
-  return structuredCardStart === -1
-    ? content
-    : content.slice(0, structuredCardStart).trim();
+  const answer =
+    structuredCardStart === -1
+      ? content
+      : content.slice(0, structuredCardStart).trim();
+
+  const cleaned = answer
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[\*_~`#>|]/g, "")
+    .replace(/≈/g, "about ")
+    .replace(/&/g, "and")
+    .replace(/[\[\]{}()]/g, " ")
+    .replace(/\s*[–—]\s*/g, ", ")
+    .replace(/\s+-\s+/g, ", ")
+    .replace(/\b(\d+)\s*[×x]\s+(shows?|tickets?)\b/gi, "$1 $2")
+    .replace(/[•]/g, ". ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  if (!concise) return cleaned;
+
+  // Search cards retain the complete results. TTS should deliver only a
+  // memorable briefing, even if a model ignores the voice-first prompt.
+  const sentences = cleaned.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [];
+  return sentences
+    .slice(0, 3)
+    .join(" ")
+    .trim()
+    .slice(0, 360);
 }
 
 export default function ChatInterface() {
   const [nexusState, setNexusState] = useState<NexusState>("sleeping");
-  const [subtitle, setSubtitle] = useState("");
   const [showChat, setShowChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [systemTime, setSystemTime] = useState("");
@@ -73,13 +150,14 @@ export default function ChatInterface() {
   const [hudCards, setHudCards] = useState<HudCard[]>([]);
 
   const messagesRef = useRef<Msg[]>([]);
-  const subtitleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stateRef = useRef<NexusState>("sleeping");
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const pendingSearchCardIdRef = useRef<string | null>(null);
   const turnHudCardIdsRef = useRef(new Set<string>());
   const latestVoiceHandlerRef = useRef<(text: string) => void>(() => {});
+  const movieLocationPromptRef = useRef<MovieLocationPrompt | null>(null);
+  const resolvedMovieLocationRef = useRef<string | null>(null);
 
   const closeTurnHudCards = useCallback(() => {
     // State updates are queued. Copy the IDs before clearing the ref so the
@@ -127,15 +205,6 @@ export default function ChatInterface() {
     useSpeech();
   const { speak: ttsSpeak, speakStatus } = useTTS();
 
-  // Show subtitle with auto-clear
-  const showSubtitle = useCallback((text: string, duration?: number) => {
-    setSubtitle(text);
-    if (subtitleTimeoutRef.current) clearTimeout(subtitleTimeoutRef.current);
-    if (duration) {
-      subtitleTimeoutRef.current = setTimeout(() => setSubtitle(""), duration);
-    }
-  }, []);
-
   const showError = useCallback((text: string, duration = 4000) => {
     setError(text);
     if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
@@ -145,17 +214,12 @@ export default function ChatInterface() {
   const resumeListening = useCallback(() => {
     setTimeout(() => {
       if (stateRef.current === "sleeping") return;
-      startListening(latestVoiceHandlerRef.current, (interim) => {
-        if (interim && stateRef.current !== "speaking") {
-          showSubtitle(`"${interim}"`);
-        }
-      });
+      startListening(latestVoiceHandlerRef.current);
     }, 250);
-  }, [startListening, showSubtitle]);
+  }, [startListening]);
 
   useEffect(() => {
     return () => {
-      if (subtitleTimeoutRef.current) clearTimeout(subtitleTimeoutRef.current);
       if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
     };
   }, []);
@@ -172,7 +236,6 @@ export default function ChatInterface() {
       // It is restarted explicitly once playback completes.
       stopListening();
       setNexusState("thinking");
-      showSubtitle("Processing...");
 
       const latestUserText = [...history]
         .reverse()
@@ -228,50 +291,46 @@ export default function ChatInterface() {
         if (data.status === "needs_confirmation" && data.pendingToolCall) {
           setPending(data.pendingToolCall);
           setNexusState("idle");
-          showSubtitle("Confirmation required. Say approve or deny.");
           return;
         }
 
         const assistantMsg = latestAssistantMessage(data.messages);
 
         if (assistantMsg?.content) {
-          const answer = spokenAnswer(assistantMsg.content);
+          const answer = spokenAnswer(
+            assistantMsg.content,
+            Boolean(latestUserText && isSearchRequest(latestUserText)),
+          );
           if (!answer) {
             stateRef.current = "idle";
             setNexusState("idle");
-            showSubtitle("");
             closeTurnHudCards();
             resumeListening();
             return;
           }
           setNexusState("speaking");
-          showSubtitle(answer);
 
           await ttsSpeak(answer, {
             onEnd: () => {
               stateRef.current = "idle";
               setNexusState("idle");
-              showSubtitle("");
               closeTurnHudCards();
               resumeListening();
             },
             onError: () => {
               stateRef.current = "idle";
               setNexusState("idle");
-              showSubtitle("");
               closeTurnHudCards();
               resumeListening();
             },
           });
         } else {
           setNexusState("idle");
-          showSubtitle("");
           closeTurnHudCards();
           resumeListening();
         }
       } catch (err) {
         setNexusState("idle");
-        showSubtitle("Sorry, I encountered an error.", 2000);
         showError(errMsg(err));
         resumeListening();
       }
@@ -280,7 +339,6 @@ export default function ChatInterface() {
       ttsSpeak,
       speakStatus,
       stopListening,
-      showSubtitle,
       showError,
       closeTurnHudCards,
       resumeListening,
@@ -294,7 +352,7 @@ export default function ChatInterface() {
   // and double-submitting the same utterance.
   // Handle voice/text input
   const handleVoiceInput = useCallback(
-    async (text: string) => {
+    async (text: string, selectedMovieLocation?: string) => {
       if (
         !text ||
         stateRef.current === "speaking" ||
@@ -303,6 +361,9 @@ export default function ChatInterface() {
         return;
 
       const lower = text.toLowerCase();
+      const resolvedMovieLocation =
+        selectedMovieLocation ?? resolvedMovieLocationRef.current;
+      resolvedMovieLocationRef.current = null;
 
       // Wake up from sleep
       if (stateRef.current === "sleeping") {
@@ -312,15 +373,56 @@ export default function ChatInterface() {
           lower.includes("nexus")
         ) {
           setNexusState("speaking");
-          showSubtitle("All systems online. What are we doing today?");
 
-          await ttsSpeak("All systems online. What are we doing today?", {
+          await ttsSpeak("At your service, sir.", {
             onEnd: () => {
               setNexusState("idle");
-              showSubtitle("");
             },
           });
         }
+        return;
+      }
+
+      const movieLocationPrompt = movieLocationPromptRef.current;
+      if (movieLocationPrompt) {
+        stopListening();
+        const prompt = movieLocationPrompt;
+        const confirmed =
+          /\b(yes|yeah|yep|correct|confirm|use it|search there|that'?s right)\b/i.test(
+            text,
+          );
+        const rejected = /\b(no|nope|wrong|change it|different)\b/i.test(text);
+
+        if (
+          prompt.phase === "confirm" &&
+          confirmed &&
+          prompt.detectedLocation
+        ) {
+          movieLocationPromptRef.current = null;
+          resolvedMovieLocationRef.current = prompt.detectedLocation;
+          void latestVoiceHandlerRef.current(prompt.text);
+          return;
+        }
+
+        if (prompt.phase === "confirm" && rejected) {
+          movieLocationPromptRef.current = {
+            ...prompt,
+            phase: "awaiting_city",
+          };
+          setNexusState("speaking");
+          await ttsSpeak("Okay. Tell me the city or area to search.", {
+            onEnd: () => {
+              setNexusState("idle");
+              resumeListening();
+            },
+          });
+          return;
+        }
+
+        // A city spoken in response to either prompt is used directly.
+        movieLocationPromptRef.current = null;
+        resolvedMovieLocationRef.current = text.trim();
+        void latestVoiceHandlerRef.current(prompt.text);
         return;
       }
 
@@ -336,15 +438,13 @@ export default function ChatInterface() {
         turnHudCardIdsRef.current.clear();
         pendingSearchCardIdRef.current = null;
         setNexusState("speaking");
-        showSubtitle("Closing the panel.");
         await ttsSpeak("Closing the panel.", {
           onEnd: () => {
             setNexusState("idle");
-            showSubtitle("");
           },
+
           onError: () => {
             setNexusState("idle");
-            showSubtitle("");
           },
         });
         return;
@@ -358,25 +458,47 @@ export default function ChatInterface() {
       ) {
         stopListening();
         setNexusState("speaking");
-        showSubtitle("Going to sleep mode...");
 
         await ttsSpeak("Going to sleep mode. Call me when you need me, sir.", {
           onEnd: () => {
             setNexusState("sleeping");
-            showSubtitle("");
             setTimeout(() => {
-              startListening(latestVoiceHandlerRef.current, (interim) => {
-                if (interim) showSubtitle(`"${interim}"`);
-              });
+              startListening(latestVoiceHandlerRef.current);
             }, 500);
           },
         });
         return;
       }
 
+      let requestText = text;
+      if (isMovieRequest(text) && !resolvedMovieLocation) {
+        stopListening();
+        const detectedLocation = await resolveMovieLocation();
+        const hasDetectedLocation = Boolean(detectedLocation);
+        movieLocationPromptRef.current = {
+          text,
+          detectedLocation,
+          phase: hasDetectedLocation ? "confirm" : "awaiting_city",
+        };
+        setNexusState("speaking");
+        const prompt = hasDetectedLocation
+          ? `I found ${detectedLocation}. Should I search for movies there? Say yes, no, or tell me another city.`
+          : "I could not detect your location. Tell me the city or area to search.";
+        await ttsSpeak(prompt, {
+          onEnd: () => {
+            setNexusState("idle");
+            resumeListening();
+          },
+        });
+        return;
+      }
+      if (resolvedMovieLocation) {
+        requestText = `${text}\n\nUser-confirmed movie-search location: ${resolvedMovieLocation}. Use only this location for nearby cinema results.`;
+      }
+
       const next: Msg[] = [
         ...messagesRef.current,
-        { role: "user", content: text },
+        { role: "user", content: requestText },
       ];
       setMessages(next);
       messagesRef.current = next;
@@ -384,7 +506,7 @@ export default function ChatInterface() {
       // Open feedback immediately for an explicit search request. This is
       // independent of the model's eventual wording/tool choice, so the HUD
       // never stays silent while a web lookup is underway.
-      if (isWebSearchRequest(text)) {
+      if (isWebSearchRequest(text) || isMovieRequest(text)) {
         const cardId = `search-request-${Date.now()}`;
         pendingSearchCardIdRef.current = cardId;
         turnHudCardIdsRef.current.add(cardId);
@@ -395,8 +517,12 @@ export default function ChatInterface() {
               id: cardId,
               kind: "info" as const,
               title: "WEB SEARCH",
-              subtitle: text,
-              body: "Searching online…",
+              subtitle: isMovieRequest(text)
+                ? "Nearby cinemas and showtimes"
+                : text,
+              body: isMovieRequest(text)
+                ? "Finding nearby movies…"
+                : "Searching online…",
             },
           ].slice(-4),
         );
@@ -404,7 +530,13 @@ export default function ChatInterface() {
 
       await callAssistant(next);
     },
-    [ttsSpeak, startListening, stopListening, showSubtitle, callAssistant],
+    [
+      ttsSpeak,
+      startListening,
+      stopListening,
+      callAssistant,
+      resumeListening,
+    ],
   );
 
   // Keep the ref pointed at the latest closure whenever it changes.
@@ -419,11 +551,6 @@ export default function ChatInterface() {
     const timer = setTimeout(() => {
       startListening(
         (text) => latestVoiceHandlerRef.current(text),
-        (interim) => {
-          if (interim && stateRef.current !== "speaking") {
-            showSubtitle(`"${interim}"`);
-          }
-        },
       );
     }, 500);
 
@@ -504,23 +631,6 @@ export default function ChatInterface() {
         {/* 3D Nexus Scene */}
         <div className="w-full flex-1 relative">
           <NexusSceneClient state={nexusState} audioLevel={audioLevel} />
-        </div>
-
-        {/* Subtitle Overlay */}
-        <div
-          className="absolute bottom-32 left-0 right-0 flex justify-center pointer-events-none"
-          aria-live="polite"
-        >
-          <div className="min-h-[48px] flex items-center justify-center px-6">
-            {subtitle && (
-              <p
-                className="text-cyan/80 text-sm font-mono max-w-lg text-center leading-relaxed animate-in fade-in slide-in-from-bottom-2 duration-300"
-                style={{ textShadow: "0 0 10px rgba(0,255,255,0.15)" }}
-              >
-                {subtitle}
-              </p>
-            )}
-          </div>
         </div>
 
         {/* Status */}

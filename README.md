@@ -51,6 +51,12 @@ on your machine.
   local alternative later, SearXNG (self-hosted) is the usual choice; swap
   the `web_search` case in `lib/tools.ts` back to hit a local SearXNG
   instance instead.
+- **Movie discovery**: say “find movies near me” or “book movie tickets.”
+  Nexus asks the browser for your location, searches nearby listings through
+  the same Tavily key, and shows official provider links. It resolves the
+  coordinates to a suggested city via OpenStreetMap, then asks you to confirm
+  or edit that city before searching. It does not store the location, buy
+  tickets, store payment details, or submit checkout forms.
 - **Files**: the `read_file`/`write_file`/`list_files`/`delete_file` tools are
   jailed to `NEXUS_FILES_DIR` (defaults to `~/nexus-files`). Nothing outside
   that directory is reachable — this is enforced in `lib/tools.ts`, not just

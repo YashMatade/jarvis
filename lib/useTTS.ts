@@ -9,10 +9,10 @@ interface TTSOptions {
 }
 
 const STATUS_RESPONSES = {
-  waking: "All systems online. What are we doing today?",
+  waking: "Nexus is awake!",
   sleeping: "Going to sleep mode. Call me when you need me.",
-  searching: "Searching for the information sir.",
-  processing: "Processing your request, just a moment.",
+  searching: "Processing",
+  processing: "Processing",
   found: "I found the information. Here's what I discovered.",
   error: "I encountered an issue. Let me try again.",
 };

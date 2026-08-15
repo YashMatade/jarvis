@@ -71,6 +71,29 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
   {
     type: "function",
     function: {
+      name: "movie_search",
+      description:
+        "Find currently playing movies, nearby cinemas, and showtimes for a location. Use this when the user asks about movies, cinemas, showtimes, or booking movie tickets. This only discovers options; never purchase tickets or open checkout unless the user explicitly selects a provider link.",
+      parameters: {
+        type: "object",
+        properties: {
+          location: {
+            type: "string",
+            description:
+              "City, neighbourhood, or user-authorized latitude/longitude to search near",
+          },
+          date: {
+            type: "string",
+            description: "Requested date, if the user gave one",
+          },
+        },
+        required: ["location"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "run_code",
       description:
         "Execute a short shell command or script on the user's machine and return stdout/stderr. Requires explicit user confirmation before it runs. Use for calculations, quick scripts, checking system state, etc.",
@@ -285,6 +308,43 @@ export async function executeTool(
         });
       } catch (err) {
         return `Web search failed: ${errMsg(err)}`;
+      }
+    }
+
+    case "movie_search": {
+      const location = String(args.location || "").trim();
+      const date = String(args.date || "today").trim();
+      if (!location) return "Movie search needs a city or location.";
+      if (!TAVILY_API_KEY) {
+        return "Movie search unavailable: no TAVILY_API_KEY set. Get a free key at https://app.tavily.com and add it to .env.local, then restart the dev server.";
+      }
+      try {
+        const query = `movies currently playing, cinema showtimes, and ticket booking near ${location} for ${date}`;
+        const res = await fetch("https://api.tavily.com/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            api_key: TAVILY_API_KEY,
+            query,
+            max_results: 8,
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          throw new Error(`Tavily returned ${res.status}: ${body || res.statusText}`);
+        }
+        const data: { results?: TavilyResult[]; answer?: string } = await res.json();
+        return JSON.stringify({
+          query,
+          answer: data.answer,
+          results: (data.results || []).map((result) => ({
+            title: result.title,
+            url: result.url,
+            snippet: result.content || "",
+          })),
+        });
+      } catch (err) {
+        return `Movie search failed: ${errMsg(err)}`;
       }
     }
 

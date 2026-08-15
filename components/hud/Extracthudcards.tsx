@@ -185,7 +185,10 @@ export function extractHudCards(
         cards.push({
           id: nextId(),
           kind: "search",
-          title: (args?.query as string) || "Search results",
+          title:
+            toolName === "movie_search"
+              ? `Movies near ${String(args?.location || "you")}`
+              : (args?.query as string) || "Search results",
           results: rawResults
             .filter(
               (
