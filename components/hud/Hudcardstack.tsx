@@ -10,13 +10,12 @@ interface HudCardStackProps {
 }
 
 // Per-kind accent so the stack reads at a glance — cyan for search
-// (default channel), violet for embedded web targets, amber for raw
-// info/fallback payloads. Kept subtle: only the accent hue changes,
-// never the structure.
-const KIND_ACCENT: Record<HudCardKind, { rgb: string; label: string }> = {
-  search: { rgb: "0, 217, 255", label: "search" },
-  web: { rgb: "167, 139, 250", label: "channel" },
-  info: { rgb: "255, 176, 84", label: "payload" },
+// (default telemetry channel), violet for embedded external feeds,
+// amber for raw info/fallback payloads.
+const KIND_ACCENT: Record<HudCardKind, { rgb: string; readout: string }> = {
+  search: { rgb: "56, 217, 255", readout: "QUERY" },
+  web: { rgb: "167, 139, 250", readout: "FEED" },
+  info: { rgb: "255, 176, 84", readout: "DATA" },
 };
 
 function KindIcon({ kind }: { kind: HudCardKind }) {
@@ -77,6 +76,29 @@ function KindIcon({ kind }: { kind: HudCardKind }) {
   );
 }
 
+// Ring telemetry badge: a rotating dashed ring around the kind icon,
+// like a targeting reticle locking on. Purely decorative, motion-safe.
+function TelemetryRing({ accent }: { accent: string }) {
+  return (
+    <span className="pointer-events-none absolute inset-0 -m-1.5">
+      <svg
+        viewBox="0 0 32 32"
+        className="h-8 w-8 motion-safe:animate-[spin_7s_linear_infinite] motion-reduce:hidden"
+      >
+        <circle
+          cx="16"
+          cy="16"
+          r="14.5"
+          fill="none"
+          stroke={`rgba(${accent}, 0.45)`}
+          strokeWidth="1"
+          strokeDasharray="3 5"
+        />
+      </svg>
+    </span>
+  );
+}
+
 function HudFrame({
   kind,
   title,
@@ -93,109 +115,134 @@ function HudFrame({
   children: ReactNode;
 }) {
   const accent = KIND_ACCENT[kind].rgb;
+  const notch = 14; // px, size of the angled header-corner cut
 
   return (
     <section
-      className="hud-card group/card relative overflow-hidden border bg-[#03090d]/95 backdrop-blur-xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-3 motion-safe:duration-300 motion-reduce:transition-none"
+      className="hud-card group/card relative border bg-[#020608]/95 backdrop-blur-xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-3 motion-safe:duration-300 motion-reduce:transition-none"
       style={
         {
           "--accent": accent,
           animationDelay: `${Math.min(index, 6) * 60}ms`,
           animationFillMode: "backwards",
           borderColor: `rgba(${accent}, 0.35)`,
-          boxShadow: `0 18px 55px rgba(0,0,0,0.55), 0 0 28px rgba(${accent}, 0.10)`,
+          boxShadow: `0 18px 60px rgba(0,0,0,0.6), 0 0 32px rgba(${accent}, 0.12), inset 0 0 40px rgba(${accent}, 0.02)`,
+          clipPath: `polygon(0 0, calc(100% - ${notch}px) 0, 100% ${notch}px, 100% 100%, ${notch}px 100%, 0 calc(100% - ${notch}px))`,
         } as React.CSSProperties
       }
     >
-      {/* corner brackets */}
+      {/* reticle tick marks at each true corner, independent of the clip */}
       <span
-        className="pointer-events-none absolute -top-px -left-px h-3.5 w-3.5 border-t-2 border-l-2 opacity-90"
+        className="pointer-events-none absolute -top-px -left-px h-4 w-4 border-t-2 border-l-2 opacity-90"
         style={{ borderColor: `rgb(${accent})` }}
       />
       <span
-        className="pointer-events-none absolute -top-px -right-px h-3.5 w-3.5 border-t-2 border-r-2 opacity-90"
+        className="pointer-events-none absolute -bottom-px -right-px h-4 w-4 border-b-2 border-r-2 opacity-90"
         style={{ borderColor: `rgb(${accent})` }}
       />
       <span
-        className="pointer-events-none absolute -bottom-px -left-px h-3.5 w-3.5 border-b-2 border-l-2 opacity-90"
-        style={{ borderColor: `rgb(${accent})` }}
-      />
-      <span
-        className="pointer-events-none absolute -bottom-px -right-px h-3.5 w-3.5 border-b-2 border-r-2 opacity-90"
+        className="pointer-events-none absolute -bottom-px -left-px h-3 w-3 border-b-2 border-l-2 opacity-70"
         style={{ borderColor: `rgb(${accent})` }}
       />
 
-      {/* top hairline sweep */}
+      {/* slow vertical scan sweep, faint, sits behind content */}
       <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-px opacity-80"
-        style={{
-          background: `linear-gradient(to right, transparent, rgb(${accent}), transparent)`,
-        }}
-      />
-      {/* faint ambient scanlines, barely-there texture rather than decoration */}
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.035]"
-        style={{
-          backgroundImage:
-            "repeating-linear-gradient(to bottom, rgba(255,255,255,0.6) 0px, rgba(255,255,255,0.6) 1px, transparent 1px, transparent 3px)",
-        }}
-      />
+        className="pointer-events-none absolute inset-0 overflow-hidden opacity-[0.06] motion-reduce:hidden"
+        aria-hidden="true"
+      >
+        <div
+          className="absolute inset-x-0 h-16 motion-safe:animate-[hud-scan_5s_ease-in-out_infinite]"
+          style={{
+            background: `linear-gradient(to bottom, transparent, rgb(${accent}), transparent)`,
+          }}
+        />
+      </div>
 
       <div
         className="relative flex items-start justify-between gap-4 border-b px-5 py-3"
         style={{
           borderColor: `rgba(${accent}, 0.2)`,
-          background: `rgba(${accent}, 0.045)`,
+          background: `rgba(${accent}, 0.05)`,
         }}
       >
-        <div className="flex min-w-0 items-start gap-2.5">
-          <span
-            className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center border"
-            style={{
-              borderColor: `rgba(${accent}, 0.4)`,
-              color: `rgb(${accent})`,
-            }}
-          >
-            <KindIcon kind={kind} />
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="relative mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center">
+            <TelemetryRing accent={accent} />
+            <span
+              className="relative flex h-5 w-5 items-center justify-center border"
+              style={{
+                borderColor: `rgba(${accent}, 0.5)`,
+                color: `rgb(${accent})`,
+              }}
+            >
+              <KindIcon kind={kind} />
+            </span>
           </span>
           <div className="min-w-0">
-            <p
-              className="truncate font-mono text-[11px] font-semibold uppercase tracking-[0.2em]"
-              style={{ color: `rgb(${accent})` }}
-            >
-              {title}
-            </p>
+            <div className="flex items-center gap-2">
+              <span
+                className="h-1.5 w-1.5 shrink-0 rounded-full motion-safe:animate-pulse"
+                style={{
+                  background: `rgb(${accent})`,
+                  boxShadow: `0 0 6px rgb(${accent})`,
+                }}
+                aria-hidden="true"
+              />
+              <p
+                className="truncate font-mono text-[11px] font-semibold uppercase tracking-[0.2em]"
+                style={{ color: `rgb(${accent})` }}
+              >
+                {title}
+              </p>
+            </div>
             {subtitle && (
-              <p className="mt-1 truncate font-mono text-[10px] leading-relaxed text-white/45">
+              <p className="mt-1 truncate pl-3.5 font-mono text-[10px] leading-relaxed text-white/45">
                 {subtitle}
               </p>
             )}
           </div>
         </div>
-        <button
-          onClick={onClose}
-          className="shrink-0 border px-2 py-1 font-mono text-[10px] text-white/60 transition-colors hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-          style={
-            {
-              borderColor: `rgba(${accent}, 0.25)`,
-              "--tw-outline-color": `rgb(${accent})`,
-            } as React.CSSProperties
-          }
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = `rgba(${accent}, 0.7)`;
-            e.currentTarget.style.background = `rgba(${accent}, 0.1)`;
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = `rgba(${accent}, 0.25)`;
-            e.currentTarget.style.background = "transparent";
-          }}
-          aria-label="Close panel"
-        >
-          ×
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            className="hidden font-mono text-[9px] uppercase tracking-[0.25em] text-white/30 sm:inline"
+            aria-hidden="true"
+          >
+            {KIND_ACCENT[kind].readout}
+          </span>
+          <button
+            onClick={onClose}
+            className="border px-2 py-1 font-mono text-[10px] text-white/60 transition-colors hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            style={
+              {
+                borderColor: `rgba(${accent}, 0.25)`,
+                "--tw-outline-color": `rgb(${accent})`,
+              } as React.CSSProperties
+            }
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = `rgba(${accent}, 0.7)`;
+              e.currentTarget.style.background = `rgba(${accent}, 0.1)`;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = `rgba(${accent}, 0.25)`;
+              e.currentTarget.style.background = "transparent";
+            }}
+            aria-label="Close panel"
+          >
+            ×
+          </button>
+        </div>
       </div>
 
       <div className="relative p-4">{children}</div>
+
+      {/* footer readout strip — thin, quiet, closes the HUD framing */}
+      <div
+        className="relative flex items-center justify-between border-t px-5 py-1.5 font-mono text-[9px] uppercase tracking-[0.2em] text-white/25"
+        style={{ borderColor: `rgba(${accent}, 0.15)` }}
+      >
+        <span>link stable</span>
+        <span>{String(index + 1).padStart(2, "0")}</span>
+      </div>
     </section>
   );
 }
@@ -220,9 +267,14 @@ export default function HudCardStack({ cards, onClose }: HudCardStackProps) {
 
   return createPortal(
     <>
-      {/* Scoped styles: thin themed scrollbars for the stack + its cards.
-          Kept out of Tailwind since scrollbar-* utilities need a plugin. */}
+      {/* Scoped keyframes + thin themed scrollbars. Kept out of Tailwind
+          since scan-sweep and scrollbar-* utilities need extra config. */}
       <style>{`
+        @keyframes hud-scan {
+          0%   { transform: translateY(-100%); }
+          50%  { transform: translateY(340%); }
+          100% { transform: translateY(-100%); }
+        }
         .hud-stack::-webkit-scrollbar,
         .hud-card ul::-webkit-scrollbar {
           width: 5px;
@@ -233,11 +285,11 @@ export default function HudCardStack({ cards, onClose }: HudCardStackProps) {
         }
         .hud-stack::-webkit-scrollbar-thumb,
         .hud-card ul::-webkit-scrollbar-thumb {
-          background: rgba(0, 217, 255, 0.25);
+          background: rgba(56, 217, 255, 0.25);
         }
         .hud-stack::-webkit-scrollbar-thumb:hover,
         .hud-card ul::-webkit-scrollbar-thumb:hover {
-          background: rgba(0, 217, 255, 0.45);
+          background: rgba(56, 217, 255, 0.45);
         }
       `}</style>
 
@@ -259,7 +311,7 @@ export default function HudCardStack({ cards, onClose }: HudCardStackProps) {
               <HudFrame
                 kind="search"
                 title={card.title}
-                subtitle={`${card.results?.length ?? 0} result${card.results?.length === 1 ? "" : "s"}`}
+                subtitle={`${card.results?.length ?? 0} result${card.results?.length === 1 ? "" : "s"} retrieved`}
                 index={index}
                 onClose={() => onClose(card.id)}
               >
@@ -270,11 +322,11 @@ export default function HudCardStack({ cards, onClose }: HudCardStackProps) {
                         href={r.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="group/item relative block overflow-hidden border border-[rgba(0,217,255,0.18)] bg-[rgba(0,217,255,0.025)] px-4 py-3.5 transition-colors hover:border-[rgba(0,217,255,0.55)] hover:bg-[rgba(0,217,255,0.07)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[rgb(0,217,255)] focus-visible:outline-offset-2"
+                        className="group/item relative block overflow-hidden border border-[rgba(56,217,255,0.18)] bg-[rgba(56,217,255,0.025)] px-4 py-3.5 transition-colors hover:border-[rgba(56,217,255,0.55)] hover:bg-[rgba(56,217,255,0.07)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[rgb(56,217,255)] focus-visible:outline-offset-2"
                       >
-                        <span className="pointer-events-none absolute inset-y-0 left-0 w-0 bg-[rgb(0,217,255)] transition-all duration-200 group-hover/item:w-0.5" />
+                        <span className="pointer-events-none absolute inset-y-0 left-0 w-0 bg-[rgb(56,217,255)] transition-all duration-200 group-hover/item:w-0.5" />
                         <div className="flex items-start gap-3">
-                          <span className="mt-0.5 font-mono text-[10px] tabular-nums text-[rgba(0,217,255,0.5)]">
+                          <span className="mt-0.5 font-mono text-[10px] tabular-nums text-[rgba(56,217,255,0.5)]">
                             {String(i + 1).padStart(2, "0")}
                           </span>
                           <div className="min-w-0 flex-1">
@@ -298,7 +350,7 @@ export default function HudCardStack({ cards, onClose }: HudCardStackProps) {
                     </li>
                   ))}
                   {(!card.results || card.results.length === 0) && (
-                    <p className="border border-dashed border-[rgba(0,217,255,0.2)] px-4 py-5 text-center font-mono text-xs text-white/45">
+                    <p className="border border-dashed border-[rgba(56,217,255,0.2)] px-4 py-5 text-center font-mono text-xs text-white/45">
                       No results returned.
                     </p>
                   )}
@@ -317,7 +369,7 @@ export default function HudCardStack({ cards, onClose }: HudCardStackProps) {
                 {card.blocked ? (
                   <div className="flex flex-col items-center justify-center gap-3 border border-dashed border-[rgba(167,139,250,0.25)] py-9 text-center">
                     <p className="font-mono text-[11px] uppercase tracking-wider text-[rgba(167,139,250,0.85)]">
-                      Site blocks embedding
+                      Feed blocks external embed
                     </p>
                     <a
                       href={card.url}
