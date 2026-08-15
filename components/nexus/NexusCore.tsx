@@ -4,10 +4,7 @@ import { useRef, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import EnergyCore from "./EnergyCore";
-import OrbitalRings from "./OrbitalRings";
-import EnergyStreams from "./EnergyStreams";
 import HexFragments from "./HexFragments";
-import HolographicGrid from "./HolographicGrid";
 import VoiceWaveform from "./Voicewaveform";
 import { NexusState } from "./types";
 import type { LiveProfile } from "./nexusProfile";
@@ -132,17 +129,8 @@ export default function NexusCore({
         <primitive object={darkCoreMaterial} attach="material" />
       </mesh>
 
-      {/* Wireframe grid */}
-      <HolographicGrid profile={profile} />
-
       {/* Energy core */}
       <EnergyCore profile={profile} audioLevel={audioLevel} />
-
-      {/* Orbital rings */}
-      <OrbitalRings profile={profile} />
-
-      {/* Energy streams */}
-      <EnergyStreams profile={profile} />
 
       {/* Hexagonal fragments */}
       <HexFragments profile={profile} />
