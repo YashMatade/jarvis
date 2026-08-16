@@ -124,6 +124,17 @@ function spokenAnswer(content: string): string {
     .trim();
 }
 
+// Each browser session gets a stable conversation id (kept in localStorage) so
+// Nexus can persist and restore the conversation across page reloads.
+function getOrCreateConversationId(): string {
+  if (typeof window === "undefined") return `conv-${Date.now()}`;
+  const existing = localStorage.getItem("nexus-conversation-id");
+  if (existing) return existing;
+  const id = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  localStorage.setItem("nexus-conversation-id", id);
+  return id;
+}
+
 export default function ChatInterface() {
   const [nexusState, setNexusState] = useState<NexusState>("sleeping");
   const [subtitle, setSubtitle] = useState("");
@@ -140,11 +151,13 @@ export default function ChatInterface() {
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stateRef = useRef<NexusState>("sleeping");
   const logEndRef = useRef<HTMLDivElement | null>(null);
+  const subtitlePanelRef = useRef<HTMLDivElement | null>(null);
   const pendingSearchCardIdRef = useRef<string | null>(null);
   const turnHudCardIdsRef = useRef(new Set<string>());
   const latestVoiceHandlerRef = useRef<(text: string) => void>(() => {});
   const movieLocationPromptRef = useRef<MovieLocationPrompt | null>(null);
   const resolvedMovieLocationRef = useRef<string | null>(null);
+  const conversationIdRef = useRef<string>(getOrCreateConversationId());
 
   const closeTurnHudCards = useCallback(() => {
     // State updates are queued. Copy the IDs before clearing the ref so the
@@ -165,10 +178,31 @@ export default function ChatInterface() {
     stateRef.current = nexusState;
   }, [nexusState]);
 
+  // Restore the persisted conversation for this session on mount.
+  useEffect(() => {
+    const id = conversationIdRef.current;
+    fetch(`/api/chat?conversationId=${encodeURIComponent(id)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.messages && data.messages.length > 0) {
+          setMessages(data.messages);
+          messagesRef.current = data.messages;
+        }
+      })
+      .catch(() => {
+        // No persisted conversation — start fresh.
+      });
+  }, []);
+
   // Auto-scroll the log to the newest message.
   useEffect(() => {
     if (showChat) logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, showChat]);
+
+  // Reset the long-subtitle panel scroll whenever a new subtitle arrives.
+  useEffect(() => {
+    if (subtitlePanelRef.current) subtitlePanelRef.current.scrollTop = 0;
+  }, [subtitle]);
 
   // System clock
   useEffect(() => {
@@ -256,6 +290,7 @@ export default function ChatInterface() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             messages: history,
+            conversationId: conversationIdRef.current,
             ...(resolveToolCall ? { resolveToolCall } : {}),
           }),
         });
@@ -608,6 +643,113 @@ export default function ChatInterface() {
     setHudCards((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
+  // Handle proactive events from the server (reminders, system alerts) that
+  // arrive via SSE. Only speaks when Nexus is idle; if it's mid-response or
+  // sleeping, the event is shown as a card + subtitle so nothing is lost.
+  const handleProactiveEvent = useCallback(
+    async (event: {
+      type: string;
+      title: string;
+      body: string;
+      reminderId?: number;
+    }) => {
+      const body = (event.body || "").trim();
+      const title = (event.title || "Nexus").trim();
+      if (!body) return;
+
+      const cardId = `proactive-${Date.now()}`;
+      setHudCards((prev) =>
+        [
+          ...prev.filter((c) => c.id !== cardId),
+          {
+            id: cardId,
+            kind: "info" as const,
+            title,
+            subtitle: body,
+            body: `${title}: ${body}`,
+          },
+        ].slice(-4),
+      );
+
+      showSubtitle(body);
+      if (stateRef.current === "idle") {
+        setNexusState("speaking");
+        await ttsSpeak(body, {
+          onEnd: () => {
+            stateRef.current = "idle";
+            setNexusState("idle");
+            showSubtitle("");
+            resumeListening();
+          },
+          onError: () => {
+            stateRef.current = "idle";
+            setNexusState("idle");
+            showSubtitle("");
+            resumeListening();
+          },
+        });
+      }
+    },
+    [showSubtitle, resumeListening, ttsSpeak],
+  );
+
+  // Keep a ref to the latest handler so the SSE connection never captures a
+  // stale closure.
+  const proactiveHandlerRef = useRef(handleProactiveEvent);
+  useEffect(() => {
+    proactiveHandlerRef.current = handleProactiveEvent;
+  }, [handleProactiveEvent]);
+
+  // Open a Server-Sent Events connection to receive proactive alerts
+  // (reminders, system health) with automatic reconnection + backoff.
+  useEffect(() => {
+    let source: EventSource | null = null;
+    let retries = 0;
+    let closed = false;
+
+    const connect = () => {
+      if (closed) return;
+      source?.close();
+      source = new EventSource("/api/events");
+
+      const onEvent = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as {
+            type: string;
+            title: string;
+            body: string;
+            reminderId?: number;
+          };
+          void proactiveHandlerRef.current(data);
+        } catch {
+          // Ignore malformed messages.
+        }
+      };
+
+      source.addEventListener("reminder", onEvent);
+      source.addEventListener("notification", onEvent);
+      source.addEventListener("system", onEvent);
+
+      source.onopen = () => {
+        retries = 0;
+      };
+
+      source.onerror = () => {
+        source?.close();
+        if (closed) return;
+        retries++;
+        const delay = Math.min(30_000, 1_000 * 2 ** retries);
+        setTimeout(connect, delay);
+      };
+    };
+
+    connect();
+    return () => {
+      closed = true;
+      source?.close();
+    };
+  }, []);
+
   return (
     <div className="min-h-screen w-full flex flex-col bg-[#010308] relative overflow-x-hidden">
       {/* Subtle background grid */}
@@ -662,19 +804,46 @@ export default function ChatInterface() {
 
         {/* Subtitle Overlay */}
         <div
-          className="absolute bottom-32 left-0 right-0 flex justify-center pointer-events-none"
+          className="absolute bottom-32 left-0 right-0 flex justify-center pointer-events-none px-6"
           aria-live="polite"
         >
-          <div className="min-h-[48px] flex items-center justify-center px-6">
-            {subtitle && (
+          {subtitle && subtitle.length > 140 ? (
+            // Long transcript — show it in a proper HUD panel instead of a
+            // single tall paragraph so it stays readable and scrollable.
+            <div
+              ref={subtitlePanelRef}
+              className="subtitle-panel w-full max-w-2xl max-h-[38vh] overflow-y-auto border border-cyan/20 bg-black/70 backdrop-blur-md px-6 py-4 animate-in fade-in slide-in-from-bottom-2 duration-300 pointer-events-auto"
+              style={{
+                boxShadow:
+                  "0 12px 40px rgba(0,0,0,0.5), 0 0 24px rgba(0,255,255,0.06), inset 0 0 40px rgba(0,255,255,0.02)",
+              }}
+            >
+              <div className="mb-2.5 flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-cyan animate-pulse" />
+                <span className="font-mono text-[9px] uppercase tracking-[0.3em] text-cyan/50">
+                  N E X U S
+                </span>
+              </div>
               <p
-                className="text-cyan/80 text-sm font-mono max-w-lg text-center leading-relaxed animate-in fade-in slide-in-from-bottom-2 duration-300"
+                className="whitespace-pre-wrap text-left font-mono text-[13px] leading-relaxed text-cyan/80"
                 style={{ textShadow: "0 0 10px rgba(0,255,255,0.15)" }}
               >
                 {subtitle}
               </p>
-            )}
-          </div>
+            </div>
+          ) : (
+            // Short status/interim — keep the clean centered one-liner.
+            <div className="min-h-[48px] flex items-center justify-center">
+              {subtitle && (
+                <p
+                  className="text-cyan/80 text-sm font-mono max-w-lg text-center leading-relaxed animate-in fade-in slide-in-from-bottom-2 duration-300"
+                  style={{ textShadow: "0 0 10px rgba(0,255,255,0.15)" }}
+                >
+                  {subtitle}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Status */}
@@ -682,7 +851,7 @@ export default function ChatInterface() {
           <span className="font-mono text-[10px] text-cyan/40 tracking-[0.3em] uppercase">
             {nexusState === "sleeping" && "SAY 'WAKE UP NEXUS'"}
             {nexusState === "idle" && "LISTENING..."}
-            {nexusState === "thinking" && "PROCESSING..."}
+            {nexusState === "thinking" && "Processing..."}
             {nexusState === "speaking" && "SPEAKING..."}
           </span>
         </div>
@@ -821,6 +990,23 @@ export default function ChatInterface() {
           border-radius: 2px;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(0, 255, 255, 0.3);
+        }
+        .subtitle-panel {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(0, 255, 255, 0.25) transparent;
+        }
+        .subtitle-panel::-webkit-scrollbar {
+          width: 4px;
+        }
+        .subtitle-panel::-webkit-scrollbar-track {
+          background: rgba(0, 255, 255, 0.05);
+        }
+        .subtitle-panel::-webkit-scrollbar-thumb {
+          background: rgba(0, 255, 255, 0.2);
+          border-radius: 2px;
+        }
+        .subtitle-panel::-webkit-scrollbar-thumb:hover {
           background: rgba(0, 255, 255, 0.3);
         }
       `}</style>

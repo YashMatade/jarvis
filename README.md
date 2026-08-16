@@ -17,6 +17,16 @@ on your machine.
 - **Tool calling** — web search, run code, read/write/list/delete files
   (jailed to one directory), and basic computer control (open apps/URLs).
 - **Structured info cards** — when the assistant researches a specific person/company/entity, it can call `show_profile_card` to present the result as a proper HUD panel (name, role, summary, facts, links) instead of a wall of spoken-style text.
+- **Persistent memory** — Nexus remembers facts about you, past tasks/decisions,
+  and full conversation history across sessions and page reloads, stored in a
+  local SQLite database (via Node's built-in `node:sqlite`, no extra deps).
+- **Reminders & proactive alerts** — set reminders ("remind me in 30 minutes"),
+  and Nexus speaks them aloud when they fire. A background scheduler also
+  monitors your system (CPU, RAM, disk, battery) and proactively alerts you
+  when something needs attention.
+- **macOS integration** — Nexus can read your calendar, create events and
+  reminders in Apple's apps, control Music, read the volume, toggle dark mode,
+  and knows the current time/date for context-aware greetings.
 - **Confirmation gate** — anything that touches your filesystem, runs code, or
   controls your computer pauses and asks you to approve it first, right in the
   UI, before it executes.
@@ -33,6 +43,7 @@ on your machine.
 4. Install deps and run:
    ```
    npm install
+   python3 -m pip install edge-tts    # required for the TTS voice output
    cp .env.local.example .env.local   # adjust models/paths if you want
    npm run dev
    ```
@@ -103,6 +114,63 @@ lib/
   errors.ts                — tiny error-message helper
 ```
 
+## Persistent memory
+
+Nexus keeps three kinds of long-term memory in a local SQLite database at
+`NEXUS_MEMORY_DIR` (defaults to `~/nexus-memory/nexus.db`):
+
+- **Facts** — stable things it learns about you ("the user prefers dark mode").
+  Nexus calls `remember_fact` when you share personal info or preferences.
+- **Episodes** — records of significant tasks/decisions ("deployed the app on
+  June 1st"). Nexus calls `remember_task` after meaningful work.
+- **Conversations** — full message history, grouped by conversation, so the
+  chat survives page reloads. Each browser session keeps a stable conversation
+  id in `localStorage` and restores it on load.
+
+Relevant memories are injected into the system prompt each turn so Nexus can
+personalize its replies. You can also ask it directly: "what do you remember
+about me?" (`list_memories`), "remember that..." (`remember_fact`), or "forget
+that" (`forget_memory`).
+
+## Reminders & proactive alerts
+
+Nexus runs a lightweight scheduler on the server (started automatically when a
+client connects). It:
+
+- **Fires reminders** — "remind me in 15 minutes to call the bank" → Nexus
+  stores it and speaks it aloud at the appointed time.
+- **Repeats reminders** — pass a `repeat_minutes` to have it re-arm itself.
+- **Monitors system health** — every 90s it checks CPU, RAM, disk, and battery,
+  and pushes a spoken alert + HUD card the first time a threshold is crossed
+  (high CPU/RAM/disk usage, low battery).
+- **Pushes via SSE** — the browser keeps a Server-Sent Events connection to
+  `/api/events` open so proactive alerts arrive even while Nexus is idle.
+
+Try it: say _"remind me in 30 seconds to drink water"_ — Nexus will interrupt
+its listening loop, speak the reminder aloud, and show a HUD card.
+
+## macOS integration
+
+Nexus can control native macOS apps through AppleScript (via `osascript`). These
+tools are exposed to the agent and require **one-time macOS automation
+permission** (System Settings → Privacy & Security → Automation) the first time
+they're used:
+
+- **Calendar** — `get_calendar_events` (safe), `create_calendar_event` (requires
+  confirmation). Ask "what's on my calendar today?" or "schedule a meeting."
+- **Reminders.app** — `get_apple_reminders`, `create_apple_reminder` (requires
+  confirmation).
+- **Music** — `control_music` (play, pause, next, previous, playlist,
+  currently playing).
+- **Notifications** — `read_notifications` (reads Notification Center).
+- **System** — `get_frontmost_app` (used indirectly), `set_appearance` (dark/
+  light mode, requires confirmation), `system_volume` (get/set, set requires
+  confirmation).
+
+Nexus also injects **current situation context** into every prompt: today's
+date/time and any pending reminders — so "good morning" becomes a personalized
+greeting with real awareness.
+
 ## Structured info cards
 
 The model has a `show_profile_card` tool (schema in `lib/tools.ts`) it can
@@ -128,12 +196,15 @@ you'll just get the old plain-text answer — nothing breaks, it's additive.
    `resolveToolCall`, and the loop picks back up from where it paused.
 
 The full conversation (including tool calls and results) lives in browser
-state and gets sent back on every request — there's no server-side session
-store, so nothing persists between page reloads. Add persistence (e.g. to a
-local SQLite file) if you want that.
+state and gets sent back on every request. It is also persisted to the local
+SQLite store after each turn (see "Persistent memory"), so the conversation
+survives page reloads and is restored automatically on the next visit.
 
 ## Notes / known limitations
 
+- The scheduler runs only while the Next.js server is running. Like any
+  always-on assistant, reminders that fire while the server is stopped are
+  marked "missed" rather than replayed.
 - Confirmation handling assumes one pending tool call at a time. If a model
   requests several tool calls in a single turn, only the first dangerous one
   triggers a pause; extend `lib/agent.ts` if you need to gate all of them.

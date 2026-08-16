@@ -5,6 +5,30 @@ import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
+import {
+  rememberFact,
+  saveEpisode,
+  recallFacts,
+  recallEpisodes,
+  listFacts,
+  forgetFact,
+  addReminder,
+  listPendingReminders,
+  cancelReminder,
+} from "./memory";
+import { getSystemHealth } from "./system";
+import {
+  createCalendarEvent,
+  getCalendarEvents,
+  createAppleReminder,
+  getAppleReminders,
+  controlMusic,
+  readNotifications,
+  getFrontmostApp,
+  setDarkMode,
+  getVolume,
+  setVolume,
+} from "./macos";
 
 const exec = promisify(execCb);
 
@@ -15,7 +39,8 @@ const exec = promisify(execCb);
 // Everything the "files" tool touches is jailed to this directory.
 // Change via .env.local: NEXUS_FILES_DIR=/absolute/path
 const FILES_ROOT = path.resolve(
-  process.env.NEXUS_FILES_DIR || path.join(os.homedir(), "nexus-files")
+  /*turbopackIgnore: true*/
+  process.env.NEXUS_FILES_DIR || path.join(os.homedir(), "nexus-files"),
 );
 
 // Hosted web search via Tavily (https://tavily.com) — built for LLM agent
@@ -37,6 +62,10 @@ export const CONFIRMATION_REQUIRED = new Set([
   "run_code",
   "write_file",
   "delete_file",
+  "create_calendar_event",
+  "create_apple_reminder",
+  "set_appearance",
+  "system_volume",
 ]);
 
 // Browser links and desktop app launches are explicit user-facing requests,
@@ -215,7 +244,8 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
           name: { type: "string", description: "The person/entity's name" },
           subtitle: {
             type: "string",
-            description: "Short role/title/description, e.g. 'Full-Stack Developer'",
+            description:
+              "Short role/title/description, e.g. 'Full-Stack Developer'",
           },
           summary: {
             type: "string",
@@ -223,7 +253,8 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
           },
           fields: {
             type: "array",
-            description: "Key facts as label/value pairs, e.g. {label: 'Experience', value: '4+ years'}",
+            description:
+              "Key facts as label/value pairs, e.g. {label: 'Experience', value: '4+ years'}",
             items: {
               type: "object",
               properties: {
@@ -235,7 +266,8 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
           },
           links: {
             type: "array",
-            description: "Relevant links, e.g. {label: 'GitHub', url: 'https://github.com/...'}",
+            description:
+              "Relevant links, e.g. {label: 'GitHub', url: 'https://github.com/...'}",
             items: {
               type: "object",
               properties: {
@@ -247,6 +279,332 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
           },
         },
         required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "remember_fact",
+      description:
+        "Store a stable fact about the user in long-term memory (e.g. 'the user's birthday is March 3rd', 'the user prefers dark mode', 'the user works on a project called jarvis'). Call this whenever the user shares personal information, preferences, or details worth remembering across sessions. This is safe and immediate.",
+      parameters: {
+        type: "object",
+        properties: {
+          fact: {
+            type: "string",
+            description:
+              "The fact to remember, phrased as a complete statement",
+          },
+          category: {
+            type: "string",
+            description:
+              "Optional category, e.g. personal, preference, project, work",
+          },
+        },
+        required: ["fact"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "remember_task",
+      description:
+        "Record a significant task, decision, or event in long-term memory (e.g. 'deployed the app to production on June 1st', 'user decided to use SQLite for memory'). Call this after completing a meaningful task or when the user makes an important decision worth recalling later.",
+      parameters: {
+        type: "object",
+        properties: {
+          summary: {
+            type: "string",
+            description: "One-line summary of the task or decision",
+          },
+          details: {
+            type: "string",
+            description: "Optional additional context or details",
+          },
+        },
+        required: ["summary"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "recall_memory",
+      description:
+        "Search long-term memory for facts about the user and past tasks/decisions relevant to the current request. Use this when you need context you may have learned in a previous session, or when the user references something from the past.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "What to search memory for",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_memories",
+      description:
+        "List all facts currently stored in long-term memory. Use this when the user asks what you remember about them.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "forget_memory",
+      description:
+        "Delete a specific fact from long-term memory by its id. Use this when the user asks you to forget something.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: {
+            type: "number",
+            description: "The id of the fact to delete",
+          },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_reminder",
+      description:
+        "Set a reminder that Nexus will fire at the specified time and speak aloud. Use for scheduling future tasks, appointments, or notifications. The time is relative to now unless an ISO date is given.",
+      parameters: {
+        type: "object",
+        properties: {
+          message: {
+            type: "string",
+            description: "The reminder message text",
+          },
+          delay_minutes: {
+            type: "number",
+            description:
+              "How many minutes from now to fire the reminder. Combine with seconds for finer control.",
+          },
+          seconds: {
+            type: "number",
+            description:
+              "Additional seconds from now (used with delay_minutes)",
+          },
+          repeat_minutes: {
+            type: "number",
+            description:
+              "Optional: repeat every N minutes after the first firing",
+          },
+        },
+        required: ["message"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_reminders",
+      description: "List all pending reminders that haven't fired yet.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "cancel_reminder",
+      description: "Cancel a pending reminder by its id.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: {
+            type: "number",
+            description: "The id of the reminder to cancel",
+          },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "system_status",
+      description:
+        "Check the current system health (CPU, memory, disk, battery) on the user's machine.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_calendar_events",
+      description:
+        "Read the user's calendar events for today (or the next N days). Use for 'what's on my calendar', 'when is my meeting', or to prepare a greeting with real context.",
+      parameters: {
+        type: "object",
+        properties: {
+          days: {
+            type: "number",
+            description: "How many days forward to look (default 1 = today)",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_calendar_event",
+      description:
+        "Create a calendar event on macOS Calendar. Requires user confirmation before it runs.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Event title" },
+          startDate: {
+            type: "string",
+            description: "ISO start date, e.g. 2026-08-20T15:00:00",
+          },
+          endDate: {
+            type: "string",
+            description: "Optional ISO end date",
+          },
+          location: { type: "string", description: "Optional location" },
+          calendar: {
+            type: "string",
+            description: "Calendar name (default 'Calendar')",
+          },
+        },
+        required: ["title", "startDate"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_apple_reminder",
+      description:
+        "Add a reminder to Apple's Reminders app. Requires user confirmation before it runs.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Reminder text" },
+          dueDate: { type: "string", description: "Optional ISO due date" },
+          list: {
+            type: "string",
+            description: "Reminders list name (default 'Reminders')",
+          },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_apple_reminders",
+      description: "List pending items in Apple's Reminders app.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "control_music",
+      description:
+        "Control the Apple Music app: play, pause, next/previous track, play a playlist, or report currently playing.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: [
+              "play",
+              "pause",
+              "next",
+              "previous",
+              "playlist",
+              "currently_playing",
+            ],
+            description: "What to do",
+          },
+          target: {
+            type: "string",
+            description:
+              "Playlist name for 'playlist', or empty for other actions",
+          },
+        },
+        required: ["action"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_notifications",
+      description: "Read recent items from the macOS Notification Center.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_appearance",
+      description:
+        "Toggle macOS dark/light appearance. Requires confirmation before it runs.",
+      parameters: {
+        type: "object",
+        properties: {
+          dark: {
+            type: "boolean",
+            description: "true for dark mode, false for light mode",
+          },
+        },
+        required: ["dark"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "system_volume",
+      description:
+        "Get or set the system volume. Requires confirmation to change.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: ["get", "set"],
+            description: "get current volume, or set it",
+          },
+          level: {
+            type: "number",
+            description: "Volume 0-100 (needed when action is 'set')",
+          },
+        },
+        required: ["action"],
       },
     },
   },
@@ -270,7 +628,7 @@ async function ensureRoot() {
 
 export async function executeTool(
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
 ): Promise<string> {
   switch (name) {
     case "web_search": {
@@ -290,9 +648,12 @@ export async function executeTool(
         });
         if (!res.ok) {
           const body = await res.text().catch(() => "");
-          throw new Error(`Tavily returned ${res.status}: ${body || res.statusText}`);
+          throw new Error(
+            `Tavily returned ${res.status}: ${body || res.statusText}`,
+          );
         }
-        const data: { results?: TavilyResult[]; answer?: string } = await res.json();
+        const data: { results?: TavilyResult[]; answer?: string } =
+          await res.json();
         // Keep the tool response structured. Besides giving the model cleaner
         // context, this is the payload the client uses to render its search
         // popup. The prior bullet-list format discarded the result boundaries,
@@ -331,9 +692,12 @@ export async function executeTool(
         });
         if (!res.ok) {
           const body = await res.text().catch(() => "");
-          throw new Error(`Tavily returned ${res.status}: ${body || res.statusText}`);
+          throw new Error(
+            `Tavily returned ${res.status}: ${body || res.statusText}`,
+          );
         }
-        const data: { results?: TavilyResult[]; answer?: string } = await res.json();
+        const data: { results?: TavilyResult[]; answer?: string } =
+          await res.json();
         return JSON.stringify({
           query,
           answer: data.answer,
@@ -391,9 +755,11 @@ export async function executeTool(
       const dir = resolveInRoot(String(args.subdirectory || "."));
       try {
         const entries = await fs.readdir(dir, { withFileTypes: true });
-        return entries
-          .map((e) => (e.isDirectory() ? `${e.name}/` : e.name))
-          .join("\n") || "(empty)";
+        return (
+          entries
+            .map((e) => (e.isDirectory() ? `${e.name}/` : e.name))
+            .join("\n") || "(empty)"
+        );
       } catch (err) {
         return `Could not list directory: ${errMsg(err)}`;
       }
@@ -420,8 +786,8 @@ export async function executeTool(
             platform === "darwin"
               ? "open"
               : platform === "win32"
-              ? "start"
-              : "xdg-open";
+                ? "start"
+                : "xdg-open";
           await exec(`${opener} ${JSON.stringify(target)}`);
           return `Opened URL: ${target}`;
         }
@@ -429,7 +795,9 @@ export async function executeTool(
           if (platform === "darwin") {
             await exec(`open -a ${JSON.stringify(target)}`);
           } else if (platform === "win32") {
-            await exec(`powershell -Command "Start-Process ${JSON.stringify(target)}"`);
+            await exec(
+              `powershell -Command "Start-Process ${JSON.stringify(target)}"`,
+            );
           } else {
             await exec(`${JSON.stringify(target.toLowerCase())} &`);
           }
@@ -446,6 +814,168 @@ export async function executeTool(
       // dispatcher (see lib/agent.ts) so it can be threaded back to the UI.
       // This branch only runs if the tool is invoked outside that loop.
       return "Card shown to the user.";
+    }
+
+    case "remember_fact": {
+      const fact = String(args.fact || "").trim();
+      if (!fact) return "remember_fact needs a fact to store.";
+      const category = String(args.category || "general").trim();
+      const stored = rememberFact(fact, category);
+      return `Remembered: "${stored.fact}" (id ${stored.id}, category ${stored.category})`;
+    }
+
+    case "remember_task": {
+      const summary = String(args.summary || "").trim();
+      if (!summary) return "remember_task needs a summary.";
+      const details = String(args.details || "").trim();
+      const episode = saveEpisode(summary, details);
+      return `Recorded task/decision: "${episode.summary}" (id ${episode.id})`;
+    }
+
+    case "recall_memory": {
+      const query = String(args.query || "").trim();
+      const facts = recallFacts(query, 8);
+      const episodes = recallEpisodes(query, 4);
+      const parts: string[] = [];
+      if (facts.length > 0) {
+        parts.push(
+          "FACTS:\n" +
+            facts.map((f) => `- [${f.category}] ${f.fact}`).join("\n"),
+        );
+      }
+      if (episodes.length > 0) {
+        parts.push(
+          "PAST TASKS/DECISIONS:\n" +
+            episodes.map((e) => `- ${e.summary}`).join("\n"),
+        );
+      }
+      return parts.length > 0
+        ? parts.join("\n\n")
+        : "No relevant memories found.";
+    }
+
+    case "list_memories": {
+      const facts = listFacts(50);
+      if (facts.length === 0) return "No facts stored yet.";
+      return facts
+        .map((f) => `- [id ${f.id}] [${f.category}] ${f.fact}`)
+        .join("\n");
+    }
+
+    case "forget_memory": {
+      const id = Number(args.id);
+      if (!Number.isFinite(id)) return "forget_memory needs a numeric id.";
+      return forgetFact(id)
+        ? `Forgot fact id ${id}.`
+        : `No fact found with id ${id}.`;
+    }
+
+    case "set_reminder": {
+      const message = String(args.message || "").trim();
+      if (!message) return "set_reminder needs a message.";
+      const delayMinutes = Number(args.delay_minutes) || 0;
+      const seconds = Number(args.seconds) || 0;
+      const repeatMinutes = Number(args.repeat_minutes) || null;
+      const totalMs = (delayMinutes * 60 + seconds) * 1000;
+      const remindAt = new Date(Date.now() + totalMs).toISOString();
+      const reminder = addReminder(message, remindAt, "general", repeatMinutes);
+      return `Reminder #${reminder.id} set for ${remindAt}: "${message}"${
+        repeatMinutes ? ` (repeats every ${repeatMinutes} min)` : ""
+      }`;
+    }
+
+    case "list_reminders": {
+      const reminders = listPendingReminders();
+      if (reminders.length === 0) return "No pending reminders.";
+      return reminders
+        .map((r) => `- [id ${r.id}] ${r.remind_at}: ${r.message}`)
+        .join("\n");
+    }
+
+    case "cancel_reminder": {
+      const id = Number(args.id);
+      if (!Number.isFinite(id)) return "cancel_reminder needs a numeric id.";
+      return cancelReminder(id)
+        ? `Cancelled reminder id ${id}.`
+        : `No pending reminder found with id ${id}.`;
+    }
+
+    case "system_status": {
+      const health = await getSystemHealth(true);
+      const parts = [
+        `CPU: ${health.cpuPct}%`,
+        `RAM: ${health.ramUsedPct}%`,
+        `Disk: ${health.diskUsedPct}%`,
+        `Load: ${health.load.toFixed(2)}`,
+      ];
+      if (health.batteryPct !== undefined) {
+        parts.push(
+          `Battery: ${health.batteryPct}% ${health.batteryCharging ? "(charging)" : ""}`,
+        );
+      }
+      return parts.join("\n");
+    }
+
+    case "get_calendar_events": {
+      const days = Number(args.days) || 1;
+      return await getCalendarEvents(days);
+    }
+
+    case "create_calendar_event": {
+      const title = String(args.title || "").trim();
+      const startDate = String(args.startDate || "").trim();
+      if (!title || !startDate) {
+        return "create_calendar_event needs title and startDate.";
+      }
+      return await createCalendarEvent({
+        title,
+        startDate,
+        endDate: args.endDate ? String(args.endDate) : undefined,
+        location: args.location ? String(args.location) : undefined,
+        calendar: args.calendar ? String(args.calendar) : undefined,
+      });
+    }
+
+    case "create_apple_reminder": {
+      const title = String(args.title || "").trim();
+      if (!title) return "create_apple_reminder needs a title.";
+      return await createAppleReminder({
+        title,
+        dueDate: args.dueDate ? String(args.dueDate) : undefined,
+        list: args.list ? String(args.list) : undefined,
+      });
+    }
+
+    case "get_apple_reminders": {
+      return await getAppleReminders();
+    }
+
+    case "control_music": {
+      const action = String(args.action || "").trim();
+      if (!action) return "control_music needs an action.";
+      const target = args.target ? String(args.target) : "";
+      return await controlMusic(action, target);
+    }
+
+    case "read_notifications": {
+      return await readNotifications();
+    }
+
+    case "set_appearance": {
+      const dark = Boolean(args.dark);
+      return await setDarkMode(dark);
+    }
+
+    case "system_volume": {
+      const action = String(args.action || "get").trim();
+      if (action === "get") {
+        return await getVolume();
+      }
+      const level = Number(args.level);
+      if (!Number.isFinite(level)) {
+        return "system_volume set needs a numeric level (0-100).";
+      }
+      return setVolume(Math.max(0, Math.min(100, level)));
     }
 
     default:
