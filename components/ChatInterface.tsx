@@ -3,6 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSpeech } from "@/lib/useSpeech";
 import { useTTS } from "@/lib/useTTS";
+import {
+  voiceStartedListening,
+  voiceStoppedListening,
+  voiceStartedSpeaking,
+  voiceStoppedSpeaking,
+  VoiceState,
+  hasWebSpeech,
+} from "@/lib/voice";
 import { errMsg } from "@/lib/errors";
 import type { OllamaToolCall } from "@/lib/ollama";
 import NexusSceneClient from "./nexus/NexusSceneClient";

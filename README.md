@@ -30,6 +30,22 @@ on your machine.
 - **Confirmation gate** — anything that touches your filesystem, runs code, or
   controls your computer pauses and asks you to approve it first, right in the
   UI, before it executes.
+- **Task orchestration** — Nexus can delegate complex multi-step work to built-in
+  task agents:
+  - **research_task** — investigate topics across multiple web sources and
+    synthesize a structured report. Use "research the best project management
+    tools for a small team" or "what's the weather like in Tokyo right now?"
+  - **devops_task** — run common development workflows in your project
+    directory: status, diff, test, build, lint, install, commit (requires
+    confirmation), log. Use "check git status" or "run the test suite".
+  - **write_report** — save a markdown report into your nexus-files directory.
+    Provide a filename and content to capture research findings or meeting notes.
+  - **format_task_plan** — describe a complex task as a numbered list of steps.
+    Nexus stores the plan as an episode in long-term memory so you can recall
+    it later.
+- **Confirmation gate** — anything that touches your filesystem, runs code, or
+  controls your computer pauses and asks you to approve it first, right in the
+  UI, before it executes.
 
 ## Setup
 
