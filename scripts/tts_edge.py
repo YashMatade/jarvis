@@ -15,7 +15,7 @@ def log(msg: str) -> None:
 async def main():
     # Voice passed as argv[1] from Node; falls back to Ryan if omitted.
     voice = sys.argv[1] if len(sys.argv) > 1 else "en-GB-RyanNeural"
-    rate = os.environ.get("EDGE_TTS_RATE", "+40%")
+    rate = os.environ.get("EDGE_TTS_RATE", "+25%")
     pitch = os.environ.get("EDGE_TTS_PITCH", "-5Hz")
     volume = os.environ.get("EDGE_TTS_VOLUME", "+0%")
 
