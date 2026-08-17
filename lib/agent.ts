@@ -2,7 +2,6 @@ import { ollamaChat, OllamaMessage, OllamaToolCall } from "./ollama";
 import { TOOL_DEFINITIONS, executeTool, requiresConfirmation } from "./tools";
 import { ProfileCardData } from "./types";
 import { buildMemoryContext, listPendingReminders } from "./memory";
-import { researchTask, devopsTask, writeReport, formatTaskPlan } from "./tasks";
 
 const SYSTEM_PROMPT = `You are Nexus — an advanced personal AI assistant inspired by JARVIS. You run primarily on the user's own machine and act as their intelligent digital operator.
 

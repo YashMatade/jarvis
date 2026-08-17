@@ -24,11 +24,11 @@ import {
   getAppleReminders,
   controlMusic,
   readNotifications,
-  getFrontmostApp,
   setDarkMode,
   getVolume,
   setVolume,
 } from "./macos";
+import { researchTask, devopsTask, writeReport, formatTaskPlan } from "./tasks";
 
 const exec = promisify(execCb);
 
@@ -66,15 +66,23 @@ export const CONFIRMATION_REQUIRED = new Set([
   "create_apple_reminder",
   "set_appearance",
   "system_volume",
+  "write_report",
 ]);
 
 // Browser links and desktop app launches are explicit user-facing requests,
 // so both can happen immediately when the assistant invokes this tool.
+// Some task agents are read-only, but mutating dev workflows (commit and
+// install) and anything writing to disk pause for approval first.
 export function requiresConfirmation(
   name: string,
-  _args: Record<string, unknown>,
+  args: Record<string, unknown>,
 ): boolean {
-  return CONFIRMATION_REQUIRED.has(name);
+  if (CONFIRMATION_REQUIRED.has(name)) return true;
+  if (name === "devops_task") {
+    const action = String(args.action || "").toLowerCase();
+    if (action === "commit" || action === "install") return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -608,6 +616,103 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "research_task",
+      description:
+        "Run a multi-angle research agent: it runs several web searches in parallel around a topic and synthesizes a structured report. Use this instead of a single web_search when the user wants a thorough investigation or comparison ('research the best project management tools for a small team'). Requires TAVILY_API_KEY.",
+      parameters: {
+        type: "object",
+        properties: {
+          topic: {
+            type: "string",
+            description: "The topic to research",
+          },
+          depth: {
+            type: "number",
+            description:
+              "How many search angles to run (1-4, default 1). Higher = more thorough but slower",
+          },
+        },
+        required: ["topic"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "devops_task",
+      description:
+        "Run a development workflow in the user's project directory. Valid actions: status, diff, test, build, lint, install, commit (requires confirmation), log. Use for 'check git status', 'run the tests', 'build the project', 'lint the code', or 'commit changes'.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: [
+              "status",
+              "diff",
+              "test",
+              "build",
+              "lint",
+              "install",
+              "commit",
+              "log",
+            ],
+            description: "Which dev workflow to run",
+          },
+          message: {
+            type: "string",
+            description: "Commit message (required when action is 'commit')",
+          },
+        },
+        required: ["action"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_report",
+      description:
+        "Write a markdown/text report into the user's nexus-files directory (jailed, same as write_file). Use this to save research findings, meeting notes, or any structured output to disk. Requires confirmation before it runs.",
+      parameters: {
+        type: "object",
+        properties: {
+          filename: {
+            type: "string",
+            description:
+              "Relative path inside nexus-files, e.g. 'notes/meeting.md'",
+          },
+          content: {
+            type: "string",
+            description: "The full report content",
+          },
+        },
+        required: ["filename", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "format_task_plan",
+      description:
+        "Describe a complex task as a numbered list of steps. Use when the user asks for a plan ('how should I approach X', 'give me a step-by-step plan'). The plan is returned to the user and also stored in long-term memory as a task episode so it can be recalled later.",
+      parameters: {
+        type: "object",
+        properties: {
+          steps: {
+            type: "array",
+            description: "The ordered steps of the plan",
+            items: { type: "string" },
+          },
+        },
+        required: ["steps"],
+      },
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -976,6 +1081,43 @@ export async function executeTool(
         return "system_volume set needs a numeric level (0-100).";
       }
       return setVolume(Math.max(0, Math.min(100, level)));
+    }
+
+    case "research_task": {
+      const topic = String(args.topic || "").trim();
+      const depth = Number(args.depth) || 3;
+      return await researchTask({ topic, depth });
+    }
+
+    case "devops_task": {
+      const action = String(args.action || "").trim();
+      const message = args.message ? String(args.message) : undefined;
+      return await devopsTask({ action, ...(message ? { message } : {}) });
+    }
+
+    case "write_report": {
+      const filename = String(args.filename || "").trim();
+      const content = String(args.content || "");
+      if (!filename) return "write_report needs a filename.";
+      return await writeReport({ filename, content });
+    }
+
+    case "format_task_plan": {
+      const steps = Array.isArray(args.steps)
+        ? args.steps.map((s) => String(s))
+        : [];
+      if (steps.length === 0) return "format_task_plan needs a steps array.";
+      // Store the plan as an episode so it can be recalled in a future session.
+      const plan = formatTaskPlan(steps);
+      try {
+        saveEpisode(
+          `Task plan: ${steps[0]}${steps.length > 1 ? ` (+${steps.length - 1} more steps)` : ""}`,
+          plan,
+        );
+      } catch {
+        // non-fatal — the plan is still returned to the user
+      }
+      return plan;
     }
 
     default:
