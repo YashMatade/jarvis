@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Yash – Portfolio</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+    <!-- Header / Navigation -->
+    <header class="site-header">
+        <nav class="nav" aria-label="Main navigation">
+            <div class="logo">Yash</div>
+            <button class="nav-toggle" aria-controls="nav-list" aria-expanded="false" aria-label="Toggle navigation">☰</button>
+            <ul id="nav-list" class="nav-list">
+                <li><a href="#home" class="nav-link">Home</a></li>
+                <li><a href="#about" class="nav-link">About</a></li>
+                <li><a href="#projects" class="nav-link">Projects</a></li>
+                <li><a href="#skills" class="nav-link">Skills</a></li>
+                <li><a href="#contact" class="nav-link">Contact</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <!-- Home -->
+        <section id="home" class="section home-section">
+            <div class="container">
+                <h1>Hello, I'm Yash.</h1>
+                <p class="tagline">Front‑end Developer & Designer</p>
+                <a href="#projects" class="btn-primary">View My Work</a>
+            </div>
+        </section>
+
+        <!-- About -->
+        <section id="about" class="section about-section">
+            <div class="container">
+                <h2>About Me</h2>
+                <p>I'm a passionate front‑end developer who builds clean, responsive, and accessible web experiences. I love turning ideas into polished interfaces using modern HTML5, CSS3 (Flexbox & Grid), and vanilla JavaScript.</p>
+            </div>
+        </section>
+
+        <!-- Projects -->
+        <section id="projects" class="section projects-section">
+            <div class="container">
+                <h2>Projects</h2>
+                <div class="projects-grid" id="projects-grid">
+                    <!-- Placeholder project cards -->
+                    <div class="project-card">
+                        <img src="https://via.placeholder.com/300x200" alt="Project placeholder image" />
+                        <h3>Project One</h3>
+                        <p>A brief description of the project.</p>
+                        <a href="#" class="btn-secondary">View Details</a>
+                    </div>
+                    <div class="project-card">
+                        <img src="https://via.placeholder.com/300x200" alt="Project placeholder image" />
+                        <h3>Project Two</h3>
+                        <p>A brief description of the project.</p>
+                        <a href="#" class="btn-secondary">View Details</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Skills -->
+        <section id="skills" class="section skills-section">
+            <div class="container">
+                <h2>Skills</h2>
+                <ul class="skills-list">
+                    <li>HTML5 &amp; CSS3 (Flexbox, Grid)</li>
+                    <li>JavaScript (ES6+)</li>
+                    <li>Responsive Design</li>
+                    <li>Accessibility (WCAG)</li>
+                    <li>Git &amp; Version Control</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- Contact -->
+        <section id="contact" class="section contact-section">
+            <div class="container">
+                <h2>Contact Me</h2>
+                <form id="contact-form" action="mailto:yash@example.com" method="post" enctype="text/plain" novalidate>
+                    <label for="name">Name</label>
+                    <input type="text" id="name" name="name" required />
+
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" required />
+
+                    <label for="message">Message</label>
+                    <textarea id="message" name="message" rows="4" required></textarea>
+
+                    <button type="submit" class="btn-primary">Send</button>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="container">
+            <p>&copy; <span id="year"></span> Yash. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="script.js" defer></script>
+</body>
+</html>

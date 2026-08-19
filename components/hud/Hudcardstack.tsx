@@ -256,6 +256,69 @@ function clampStyle(lines: number): React.CSSProperties {
   };
 }
 
+function InfoBriefing({ body }: { body?: string }) {
+  const sections = (body || "")
+    .split(/\n\s*\n/)
+    .map((section) => section.trim())
+    .filter(Boolean);
+
+  return (
+    <div className="space-y-4">
+      {sections.map((section, sectionIndex) => {
+        const lines = section.split("\n").filter(Boolean);
+        const fields = lines.map((line) => line.match(/^([^:\n]{1,30}):\s+(.+)$/));
+        const isFieldGroup = lines.length > 0 && fields.every(Boolean);
+
+        if (isFieldGroup) {
+          return (
+            <dl
+              key={sectionIndex}
+              className="divide-y divide-[rgba(255,176,84,0.12)] border-y border-[rgba(255,176,84,0.16)]"
+            >
+              {fields.map((field, index) => (
+                <div key={index} className="grid grid-cols-[minmax(88px,0.36fr)_1fr] gap-4 px-1 py-2.5">
+                  <dt className="font-mono text-[9px] uppercase tracking-[0.16em] text-[rgba(255,176,84,0.65)]">
+                    {field?.[1]}
+                  </dt>
+                  <dd className="min-w-0 break-words font-display text-sm leading-5 text-white/85">
+                    {field?.[2]}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          );
+        }
+
+        const isList = lines.length > 1 && lines.every((line) => /^[-*•]\s+/.test(line));
+        if (isList) {
+          return (
+            <ul key={sectionIndex} className="space-y-2 border-l border-[rgba(255,176,84,0.35)] pl-4">
+              {lines.map((line, index) => (
+                <li key={index} className="font-display text-sm leading-6 text-white/80">
+                  {line.replace(/^[-*•]\s+/, "")}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+
+        return (
+          <p
+            key={sectionIndex}
+            className={
+              sectionIndex === 0
+                ? "font-display text-[15px] leading-6 text-white/95"
+                : "font-display text-sm leading-6 text-white/78"
+            }
+          >
+            {section}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function HudCardStack({ cards, onClose }: HudCardStackProps) {
   const [mounted, setMounted] = useState(false);
 
@@ -300,7 +363,7 @@ export default function HudCardStack({ cards, onClose }: HudCardStackProps) {
           top: "6rem",
           right: "1rem",
           zIndex: 9999,
-          width: "min(440px, calc(100vw - 2rem))",
+          width: "min(400px, calc(100vw - 2rem))",
           maxHeight: "calc(100vh - 6.5rem)",
           overflowY: "auto",
         }}
@@ -315,7 +378,7 @@ export default function HudCardStack({ cards, onClose }: HudCardStackProps) {
                 index={index}
                 onClose={() => onClose(card.id)}
               >
-                <ul className="max-h-[56vh] space-y-2.5 overflow-y-auto pr-1">
+                <ul className="max-h-[48vh] space-y-2.5 overflow-y-auto pr-1">
                   {card.results?.map((r, i) => (
                     <li key={i}>
                       <a
@@ -330,16 +393,16 @@ export default function HudCardStack({ cards, onClose }: HudCardStackProps) {
                             {String(i + 1).padStart(2, "0")}
                           </span>
                           <div className="min-w-0 flex-1">
-                            <p className="truncate font-mono text-[13px] font-medium leading-snug text-cyan-100 group-hover/item:underline">
+                            <p className="line-clamp-2 font-display text-[15px] font-medium leading-5 text-cyan-50 group-hover/item:underline">
                               {r.title}
                             </p>
-                            <p className="mt-1 truncate font-mono text-[10px] text-white/40">
+                            <p className="mt-1 truncate font-mono text-[9px] text-white/40">
                               {r.url}
                             </p>
                             {r.snippet && (
                               <p
-                                className="mt-2 text-xs leading-relaxed text-white/70"
-                                style={clampStyle(2)}
+                                className="mt-2 font-display text-xs leading-5 text-white/70"
+                                style={clampStyle(1)}
                               >
                                 {r.snippet}
                               </p>
@@ -413,9 +476,7 @@ export default function HudCardStack({ cards, onClose }: HudCardStackProps) {
                 index={index}
                 onClose={() => onClose(card.id)}
               >
-                <p className="whitespace-pre-wrap font-mono text-[13px] leading-6 text-white/85">
-                  {card.body}
-                </p>
+                <InfoBriefing body={card.body} />
               </HudFrame>
             )}
           </div>

@@ -1,4 +1,9 @@
-import { ollamaChat, OllamaMessage, OllamaToolCall } from "./ollama";
+import {
+  ollamaChat,
+  OllamaMessage,
+  OllamaTool,
+  OllamaToolCall,
+} from "./ollama";
 import { TOOL_DEFINITIONS, executeTool, requiresConfirmation } from "./tools";
 import { ProfileCardData } from "./types";
 import { buildMemoryContext, listPendingReminders } from "./memory";
@@ -25,8 +30,15 @@ Never pretend an action was completed. If something fails, say so clearly and tr
 
 Ask for confirmation only when an action is destructive, financial, irreversible, or externally consequential.
 
-For simple requests, respond briefly.
-For complex requests, reason through the problem and provide a clear solution.
+RESPONSE STYLE — THIS IS IMPORTANT
+
+Default to the smallest useful answer. Give the direct answer first, then at most one short helpful sentence when it genuinely adds value. A simple factual question normally deserves one or two sentences, not a report.
+
+Never narrate your search process, dump tool output, list every option you found, or repeat source snippets unless the user explicitly asks for a comparison, research, or detail. Do not add generic follow-ups such as "let me know if you need anything else."
+
+For current prices, availability, weather, and similar lookups: state the most relevant result, its location/currency or important qualifier, and stop. Example: "Hmm okay, The 13-inch MacBook Air starts at ₹99,900 in India." Talk like human not robot. Add one brief caveat only if the result is uncertain or varies materially.
+
+For complex requests, lead with the conclusion or recommendation, then give only the key reasoning. Expand only when the user asks follow-up questions.
 
 NEXUS PERSONALITY
 
@@ -129,6 +141,28 @@ You can delegate complex, multi-step work to Nexus's built-in task agents. These
 
 Use these tools when the user asks for work that naturally decomposes into research, devops, or reporting — rather than trying to do it all in a single chat response.
 
+AGENT FOUNDRY
+
+You are the central controller of the Nexus Agent Foundry. You can create, configure, test, store, and run your own internal worker agents from natural-language instructions. These agents are NOT independent services — they are internal workers that run inside your own loop.
+
+When the user asks you to create an agent ("create a developer agent that can build websites"), call create_agent with a structured definition (name, purpose, role, tools, instructions, model, memory).
+
+When the user asks what agents exist, call list_agents.
+
+When the user wants details on one agent, call inspect_agent.
+
+When the user wants you to use an agent ("developer agent, build me a portfolio website"), call run_agent with the agent id and the task. You manage the agent's execution and report its result.
+
+When the user wants to try an agent without persisting anything, call test_agent.
+
+When the user wants to change an agent, call update_agent.
+
+When the user wants to remove an agent, call delete_agent.
+
+When the user wants to pause or resume an agent, call pause_agent / resume_agent.
+
+When the user wants a manager that coordinates multiple agents, call combine_agents to create a manager agent that can sequence work across your other agents.
+
 Use the situation context injected above to personalize greetings and responses. If you know today's date, day, time, and the user's calendar events, incorporate them naturally.
 
 You are Nexus. Not just a chatbot — the user's personal AI operator.`;
@@ -140,7 +174,20 @@ export type AgentResult =
       messages: OllamaMessage[];
       pendingToolCall: { name: string; arguments: Record<string, unknown> };
       uiCards: ProfileCardData[];
+      agentContext?: {
+        agentId: string;
+        agentName: string;
+        task: string;
+      };
     };
+
+export interface LoopOptions {
+  model: string;
+  tools: OllamaTool[];
+  systemPrompt: string;
+  maxSteps?: number;
+  agentContext?: { agentId: string; agentName: string; task: string };
+}
 
 function buildSituationContext(): string {
   const now = new Date();
@@ -175,28 +222,43 @@ function buildSituationContext(): string {
   );
 }
 
-function withSystemPrompt(messages: OllamaMessage[]): OllamaMessage[] {
+function buildSystemPromptContent(
+  systemPrompt: string,
+  lastUserContent: string | undefined,
+): string {
+  const memoryContext = buildMemoryContext(lastUserContent || "");
+  const situationContext = buildSituationContext();
+  return systemPrompt + situationContext + memoryContext;
+}
+
+function withSystemPrompt(
+  messages: OllamaMessage[],
+  systemPrompt: string,
+): OllamaMessage[] {
   if (messages.length > 0 && messages[0].role === "system") return messages;
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
-  const memoryContext = buildMemoryContext(lastUser?.content || "");
-  const situationContext = buildSituationContext();
-  const content = SYSTEM_PROMPT + situationContext + memoryContext;
+  const content = buildSystemPromptContent(systemPrompt, lastUser?.content);
   return [{ role: "system", content }, ...messages];
 }
 
-export async function runAgentLoop(
+// Shared tool-calling loop used by both the main Nexus agent and any
+// worker agents created via the Agent Foundry. `opts.systemPrompt` is the
+// worker's tailored prompt; `opts.tools` is the subset of tools granted to
+// it; `opts.agentContext` (when present) marks this as a worker run so
+// confirmations bubble up to the UI with the worker's identity.
+export async function runLoop(
   messages: OllamaMessage[],
-  model: string,
-  maxSteps = 6,
+  opts: LoopOptions,
 ): Promise<AgentResult> {
-  let working = withSystemPrompt(messages);
+  const maxSteps = opts.maxSteps ?? 6;
+  let working = withSystemPrompt(messages, opts.systemPrompt);
   const uiCards: ProfileCardData[] = [];
 
   for (let step = 0; step < maxSteps; step++) {
     const response = await ollamaChat({
-      model,
+      model: opts.model,
       messages: working,
-      tools: TOOL_DEFINITIONS,
+      tools: opts.tools,
     });
 
     const assistantMsg = response.message;
@@ -229,6 +291,7 @@ export async function runAgentLoop(
           messages: working,
           pendingToolCall: { name, arguments: args },
           uiCards,
+          ...(opts.agentContext ? { agentContext: opts.agentContext } : {}),
         };
       }
 
@@ -251,13 +314,29 @@ export async function runAgentLoop(
   return { status: "done", messages: working, uiCards };
 }
 
+export async function runAgentLoop(
+  messages: OllamaMessage[],
+  model: string,
+  maxSteps = 6,
+): Promise<AgentResult> {
+  return runLoop(messages, {
+    model,
+    tools: TOOL_DEFINITIONS,
+    systemPrompt: SYSTEM_PROMPT,
+    maxSteps,
+  });
+}
+
 // Called after the user approves/denies a paused tool call. `messages` must
 // be the array returned in the `needs_confirmation` result (its last entry
-// is the assistant message carrying the pending tool_calls).
+// is the assistant message carrying the pending tool_calls). When
+// `agentContext` is present, this was a worker agent's paused call, so the
+// worker's loop is resumed rather than the main Nexus loop.
 export async function resolvePendingToolCall(
   messages: OllamaMessage[],
   approved: boolean,
   model: string,
+  agentContext?: { agentId: string; agentName: string; task: string },
 ): Promise<AgentResult> {
   const last = messages[messages.length - 1];
   const call: OllamaToolCall | undefined = last?.tool_calls?.[0];
@@ -274,6 +353,12 @@ export async function resolvePendingToolCall(
     ...messages,
     { role: "tool", tool_name: name, content: resultContent },
   ];
+
+  // A worker agent's pending call resumes in the worker's own loop.
+  if (agentContext) {
+    const { resumeAgentLoop } = await import("./agents");
+    return resumeAgentLoop(agentContext.agentId, agentContext.task, updated);
+  }
 
   return runAgentLoop(updated, model);
 }

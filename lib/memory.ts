@@ -13,6 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { NexusAgent, NexusAgentSummary } from "./types";
 
 const MEMORY_DIR = path.resolve(
   /*turbopackIgnore: true*/
@@ -118,6 +119,23 @@ function getDb(): DatabaseSync {
       type TEXT NOT NULL DEFAULT 'notification',
       acknowledged INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS agents (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      purpose TEXT NOT NULL DEFAULT '',
+      role TEXT NOT NULL DEFAULT '',
+      system_instructions TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT 'agent',
+      tools TEXT NOT NULL DEFAULT '[]',
+      memory INTEGER NOT NULL DEFAULT 1,
+      capabilities TEXT NOT NULL DEFAULT '[]',
+      execution_rules TEXT NOT NULL DEFAULT '',
+      workflow TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
   return db;
@@ -455,4 +473,154 @@ export function markNotificationsAcknowledged(ids: number[]): void {
   d.prepare(
     `UPDATE notifications SET acknowledged = 1 WHERE id IN (${placeholders})`,
   ).run(...ids.map(String));
+}
+
+// ---------------------------------------------------------------------------
+// Nexus Agent Foundry — persistent agent store
+// ---------------------------------------------------------------------------
+
+interface AgentRow {
+  id: string;
+  name: string;
+  purpose: string;
+  role: string;
+  system_instructions: string;
+  model: string;
+  tools: string;
+  memory: number;
+  capabilities: string;
+  execution_rules: string;
+  workflow: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToAgent(row: AgentRow): NexusAgent {
+  return {
+    id: row.id,
+    name: row.name,
+    purpose: row.purpose,
+    role: row.role,
+    systemInstructions: row.system_instructions,
+    model: row.model,
+    tools: safeJsonArray(row.tools),
+    memory: row.memory === 1,
+    capabilities: safeJsonArray(row.capabilities),
+    executionRules: row.execution_rules,
+    workflow: row.workflow,
+    status: (row.status as NexusAgent["status"]) || "active",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function safeJsonArray(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function createAgent(agent: NexusAgent): NexusAgent {
+  const d = getDb();
+  d.prepare(
+    `INSERT INTO agents (
+       id, name, purpose, role, system_instructions, model, tools,
+       memory, capabilities, execution_rules, workflow, status
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    agent.id,
+    agent.name,
+    agent.purpose,
+    agent.role,
+    agent.systemInstructions,
+    agent.model,
+    JSON.stringify(agent.tools),
+    agent.memory ? 1 : 0,
+    JSON.stringify(agent.capabilities),
+    agent.executionRules,
+    agent.workflow,
+    agent.status,
+  );
+  return getAgent(agent.id)!;
+}
+
+export function getAgent(id: string): NexusAgent | null {
+  const d = getDb();
+  const row = d
+    .prepare(`SELECT * FROM agents WHERE id = ?`)
+    .get(id) as unknown as AgentRow | undefined;
+  return row ? rowToAgent(row) : null;
+}
+
+export function listAgents(): NexusAgent[] {
+  const d = getDb();
+  const rows = d
+    .prepare(`SELECT * FROM agents ORDER BY updated_at DESC`)
+    .all() as unknown as AgentRow[];
+  return rows.map(rowToAgent);
+}
+
+export function listAgentSummaries(): NexusAgentSummary[] {
+  return listAgents().map((a) => ({
+    id: a.id,
+    name: a.name,
+    purpose: a.purpose,
+    status: a.status,
+    tools: a.tools,
+    capabilities: a.capabilities,
+    updatedAt: a.updatedAt,
+  }));
+}
+
+export function updateAgent(
+  id: string,
+  patch: Partial<Omit<NexusAgent, "id" | "createdAt">>,
+): NexusAgent | null {
+  const d = getDb();
+  const existing = getAgent(id);
+  if (!existing) return null;
+  const merged: NexusAgent = {
+    ...existing,
+    ...patch,
+    id,
+    createdAt: existing.createdAt,
+  };
+  d.prepare(
+    `UPDATE agents SET
+       name = ?, purpose = ?, role = ?, system_instructions = ?, model = ?,
+       tools = ?, memory = ?, capabilities = ?, execution_rules = ?,
+       workflow = ?, status = ?, updated_at = datetime('now')
+     WHERE id = ?`,
+  ).run(
+    merged.name,
+    merged.purpose,
+    merged.role,
+    merged.systemInstructions,
+    merged.model,
+    JSON.stringify(merged.tools),
+    merged.memory ? 1 : 0,
+    JSON.stringify(merged.capabilities),
+    merged.executionRules,
+    merged.workflow,
+    merged.status,
+    id,
+  );
+  return getAgent(id);
+}
+
+export function setAgentStatus(
+  id: string,
+  status: NexusAgent["status"],
+): NexusAgent | null {
+  return updateAgent(id, { status });
+}
+
+export function deleteAgent(id: string): boolean {
+  const d = getDb();
+  const res = d.prepare(`DELETE FROM agents WHERE id = ?`).run(id);
+  return Number(res.changes) > 0;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSpeech } from "@/lib/useSpeech";
 import { useTTS } from "@/lib/useTTS";
 import {
@@ -31,6 +31,12 @@ interface PendingConfirmation {
   arguments: Record<string, unknown>;
 }
 
+interface AgentContext {
+  agentId: string;
+  agentName: string;
+  task: string;
+}
+
 interface MovieLocationPrompt {
   text: string;
   detectedLocation: string;
@@ -38,9 +44,12 @@ interface MovieLocationPrompt {
 }
 
 interface ChatApiResponse {
-  status?: "needs_confirmation" | "ok";
+  status?: "done" | "needs_confirmation" | "ok";
   pendingToolCall?: PendingConfirmation;
+  agentContext?: AgentContext;
+  agentRun?: boolean;
   messages?: Msg[];
+  workerMessages?: Msg[];
   uiCards?: ProfileCardData[];
 }
 
@@ -132,6 +141,48 @@ function spokenAnswer(content: string): string {
     .trim();
 }
 
+// Voice answers are often a mix of a clear conclusion, follow-up detail, and
+// occasional lists. Present those as a compact briefing instead of a terminal
+// dump, while leaving the original message untouched in the chat history.
+function AnswerBriefing({ text }: { text: string }) {
+  const sections = text
+    .split(/\n\s*\n/)
+    .map((section) => section.trim())
+    .filter(Boolean);
+
+  const renderSection = (section: string, index: number): ReactNode => {
+    const lines = section.split("\n").filter(Boolean);
+    const isList = lines.length > 1 && lines.every((line) => /^[-*•]\s+/.test(line));
+
+    if (isList) {
+      return (
+        <ul key={`${section}-${index}`} className="mt-3 space-y-2 border-l border-cyan/25 pl-4">
+          {lines.map((line, lineIndex) => (
+            <li key={lineIndex} className="font-display text-sm leading-6 text-slate-200/85">
+              {line.replace(/^[-*•]\s+/, "")}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+
+    return (
+      <p
+        key={`${section}-${index}`}
+        className={
+          index === 0
+            ? "font-display text-[17px] font-medium leading-7 text-white sm:text-lg"
+            : "font-display text-sm leading-6 text-slate-200/80"
+        }
+      >
+        {section}
+      </p>
+    );
+  };
+
+  return <div className="space-y-3">{sections.map(renderSection)}</div>;
+}
+
 // Each browser session gets a stable conversation id (kept in localStorage) so
 // Nexus can persist and restore the conversation across page reloads.
 function getOrCreateConversationId(): string {
@@ -152,9 +203,13 @@ export default function ChatInterface() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [textInput, setTextInput] = useState("");
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
+  const [pendingAgentContext, setPendingAgentContext] =
+    useState<AgentContext | null>(null);
   const [hudCards, setHudCards] = useState<HudCard[]>([]);
 
   const messagesRef = useRef<Msg[]>([]);
+  const pendingWorkerMessagesRef = useRef<Msg[] | null>(null);
+  const activeAgentDisplayHistoryRef = useRef<Msg[] | null>(null);
   const subtitleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stateRef = useRef<NexusState>("sleeping");
@@ -274,6 +329,7 @@ export default function ChatInterface() {
     async (
       history: Msg[],
       resolveToolCall?: { approved: boolean },
+      agentContext?: AgentContext | null,
     ): Promise<void> => {
       // Do not let recognition consume Nexus's own status/final speech.
       // It is restarted explicitly once playback completes.
@@ -300,6 +356,7 @@ export default function ChatInterface() {
             messages: history,
             conversationId: conversationIdRef.current,
             ...(resolveToolCall ? { resolveToolCall } : {}),
+            ...(agentContext ? { agentContext } : {}),
           }),
         });
 
@@ -310,8 +367,30 @@ export default function ChatInterface() {
         const data: ChatApiResponse = await res.json();
 
         if (data.messages) {
-          setMessages(data.messages);
-          messagesRef.current = data.messages;
+          // A worker keeps its own private tool transcript. Keep the user's
+          // main chat readable by showing the original request and only the
+          // worker's final answer, while retaining its full transcript solely
+          // for a confirmation/resume request.
+          const workerAnswer = latestAssistantMessage(data.messages);
+          if (data.agentRun && !activeAgentDisplayHistoryRef.current) {
+            activeAgentDisplayHistoryRef.current = history;
+          }
+          const agentDisplayHistory =
+            activeAgentDisplayHistoryRef.current || history;
+          const displayMessages = data.agentRun
+            ? data.status === "needs_confirmation" || !workerAnswer
+              ? agentDisplayHistory
+              : [...agentDisplayHistory, workerAnswer]
+            : data.messages;
+          setMessages(displayMessages);
+          messagesRef.current = displayMessages;
+
+          if (data.status === "needs_confirmation" && data.workerMessages) {
+            pendingWorkerMessagesRef.current = data.workerMessages;
+          } else if (data.agentRun) {
+            pendingWorkerMessagesRef.current = null;
+            activeAgentDisplayHistoryRef.current = null;
+          }
 
           const newCards = extractHudCards(
             data.messages,
@@ -335,6 +414,7 @@ export default function ChatInterface() {
 
         if (data.status === "needs_confirmation" && data.pendingToolCall) {
           setPending(data.pendingToolCall);
+          setPendingAgentContext(data.agentContext || null);
           setNexusState("idle");
           showSubtitle("Confirmation required. Say approve or deny.");
           return;
@@ -644,7 +724,14 @@ export default function ChatInterface() {
   // Handle confirmation
   const handleConfirmation = async (approved: boolean) => {
     setPending(null);
-    await callAssistant(messagesRef.current, { approved });
+    const agentContext = pendingAgentContext;
+    setPendingAgentContext(null);
+    const workerMessages = pendingWorkerMessagesRef.current;
+    await callAssistant(
+      workerMessages || messagesRef.current,
+      { approved },
+      agentContext,
+    );
   };
 
   const handleCloseCard = useCallback((id: string) => {
@@ -812,7 +899,9 @@ export default function ChatInterface() {
 
         {/* Subtitle Overlay */}
         <div
-          className="absolute bottom-32 left-0 right-0 flex justify-center pointer-events-none px-6"
+          className={`absolute bottom-32 left-6 right-6 flex justify-center pointer-events-none transition-[right] duration-300 ${
+            hudCards.length > 0 ? "lg:right-[29rem]" : ""
+          }`}
           aria-live="polite"
         >
           {subtitle && subtitle.length > 140 ? (
@@ -820,7 +909,7 @@ export default function ChatInterface() {
             // single tall paragraph so it stays readable and scrollable.
             <div
               ref={subtitlePanelRef}
-              className="subtitle-panel w-full max-w-2xl max-h-[38vh] overflow-y-auto border border-cyan/20 bg-black/70 backdrop-blur-md px-6 py-4 animate-in fade-in slide-in-from-bottom-2 duration-300 pointer-events-auto"
+              className="subtitle-panel w-full max-w-2xl max-h-[38vh] overflow-y-auto border border-cyan/20 bg-black/85 backdrop-blur-md px-6 py-4 animate-in fade-in slide-in-from-bottom-2 duration-300 pointer-events-auto"
               style={{
                 boxShadow:
                   "0 12px 40px rgba(0,0,0,0.5), 0 0 24px rgba(0,255,255,0.06), inset 0 0 40px rgba(0,255,255,0.02)",
@@ -832,23 +921,17 @@ export default function ChatInterface() {
                   N E X U S
                 </span>
               </div>
-              <p
-                className="whitespace-pre-wrap text-left font-mono text-[13px] leading-relaxed text-cyan/80"
-                style={{ textShadow: "0 0 10px rgba(0,255,255,0.15)" }}
-              >
-                {subtitle}
-              </p>
+              <AnswerBriefing text={subtitle} />
             </div>
           ) : (
             // Short status/interim — keep the clean centered one-liner.
-            <div className="min-h-[48px] flex items-center justify-center">
+            <div className="min-h-[48px] flex w-full items-center justify-center">
               {subtitle && (
-                <p
-                  className="text-cyan/80 text-sm font-mono max-w-lg text-center leading-relaxed animate-in fade-in slide-in-from-bottom-2 duration-300"
-                  style={{ textShadow: "0 0 10px rgba(0,255,255,0.15)" }}
-                >
-                  {subtitle}
-                </p>
+                <div className="max-w-xl border-l-2 border-cyan/60 bg-black/70 px-4 py-2 text-center shadow-[0_0_22px_rgba(0,255,255,0.06)] animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <p className="font-display text-[15px] leading-6 text-slate-100/90">
+                    {subtitle}
+                  </p>
+                </div>
               )}
             </div>
           )}
@@ -960,6 +1043,11 @@ export default function ChatInterface() {
                   <span className="text-amber-500">&gt;</span> Execute:{" "}
                   {pending.name}
                 </p>
+                {pendingAgentContext && (
+                  <p className="text-[10px] text-amber-400/70 font-mono mb-2">
+                    Requested by: {pendingAgentContext.agentName}
+                  </p>
+                )}
                 <pre className="text-[11px] font-mono bg-black/50 border border-amber-500/20 p-3 text-amber-400/70 overflow-x-auto">
                   {JSON.stringify(pending.arguments, null, 2)}
                 </pre>

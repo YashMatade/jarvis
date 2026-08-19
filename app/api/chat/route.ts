@@ -8,6 +8,7 @@ import {
   loadConversation,
   listConversations,
 } from "@/lib/memory";
+import { findAgentInvocation, runAgent } from "@/lib/agents";
 
 export const runtime = "nodejs";
 
@@ -41,6 +42,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const messages: OllamaMessage[] = body.messages;
     const resolve: { approved: boolean } | undefined = body.resolveToolCall;
+    const agentContext = body.agentContext;
     const conversationId: string =
       body.conversationId || `conv-${Date.now()}`;
 
@@ -53,9 +55,23 @@ export async function POST(req: NextRequest) {
 
     const model = body.model || chooseModel(messages);
 
+    const requestedAgent = !resolve
+      ? findAgentInvocation(
+          [...messages].reverse().find((message) => message.role === "user")
+            ?.content || "",
+        )
+      : null;
+    const workerRun = Boolean(requestedAgent || agentContext);
     const result = resolve
-      ? await resolvePendingToolCall(messages, resolve.approved, model)
-      : await runAgentLoop(messages, model);
+      ? await resolvePendingToolCall(
+          messages,
+          resolve.approved,
+          model,
+          agentContext,
+        )
+      : requestedAgent
+        ? await runAgent(requestedAgent.agent.id, requestedAgent.task)
+        : await runAgentLoop(messages, model);
 
     const clientMessages = stripSystem(result.messages);
 
@@ -72,6 +88,13 @@ export async function POST(req: NextRequest) {
       messages: clientMessages,
       model,
       conversationId,
+      ...(result.status === "needs_confirmation" && result.agentContext
+        ? { agentContext: result.agentContext }
+        : {}),
+      ...(workerRun ? { agentRun: true } : {}),
+      ...(result.status === "needs_confirmation" && workerRun
+        ? { workerMessages: clientMessages }
+        : {}),
     });
   } catch (err) {
     return NextResponse.json(

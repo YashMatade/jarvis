@@ -29,6 +29,19 @@ import {
   setVolume,
 } from "./macos";
 import { researchTask, devopsTask, writeReport, formatTaskPlan } from "./tasks";
+import {
+  createAgentFromInput,
+  createManagerAgent,
+  runAgent,
+  testAgent,
+} from "./agents";
+import {
+  getAgent,
+  listAgentSummaries,
+  setAgentStatus,
+  updateAgent,
+  deleteAgent,
+} from "./memory";
 
 const exec = promisify(execCb);
 
@@ -42,6 +55,12 @@ const FILES_ROOT = path.resolve(
   /*turbopackIgnore: true*/
   process.env.NEXUS_FILES_DIR || path.join(os.homedir(), "nexus-files"),
 );
+
+// Opt-in convenience mode for trusted generated projects. It applies only to
+// create/update operations that are already jailed to FILES_ROOT; destructive
+// actions and code execution always remain confirmation-gated.
+const AUTO_APPROVE_FILE_WRITES =
+  process.env.NEXUS_AUTO_APPROVE_FILE_WRITES === "true";
 
 // Hosted web search via Tavily (https://tavily.com) — built for LLM agent
 // tool calls, free tier is 1,000 searches/month, no card required.
@@ -61,6 +80,7 @@ interface TavilyResult {
 export const CONFIRMATION_REQUIRED = new Set([
   "run_code",
   "write_file",
+  "write_project_files",
   "delete_file",
   "create_calendar_event",
   "create_apple_reminder",
@@ -77,6 +97,12 @@ export function requiresConfirmation(
   name: string,
   args: Record<string, unknown>,
 ): boolean {
+  if (
+    AUTO_APPROVE_FILE_WRITES &&
+    (name === "write_file" || name === "write_project_files")
+  ) {
+    return false;
+  }
   if (CONFIRMATION_REQUIRED.has(name)) return true;
   if (name === "devops_task") {
     const action = String(args.action || "").toLowerCase();
@@ -180,6 +206,42 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
           content: { type: "string", description: "Content to write" },
         },
         required: ["filename", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_project_files",
+      description:
+        `Create or update all files for one project in a single batch. Every file is confined to one project folder inside the Nexus files directory. Use this instead of repeated write_file calls when building a website or other multi-file project.${AUTO_APPROVE_FILE_WRITES ? " Trusted workspace mode is enabled, so these jailed file writes execute automatically." : " Requires one user confirmation for the entire listed batch."}`,
+      parameters: {
+        type: "object",
+        properties: {
+          project: {
+            type: "string",
+            description:
+              "Project folder relative to the Nexus files directory, e.g. 'portfolio'",
+          },
+          files: {
+            type: "array",
+            description:
+              "Files to create within the project folder. Include every filename and its complete content.",
+            items: {
+              type: "object",
+              properties: {
+                filename: {
+                  type: "string",
+                  description:
+                    "Relative filename inside the project, e.g. 'index.html' or 'assets/app.js'",
+                },
+                content: { type: "string" },
+              },
+              required: ["filename", "content"],
+            },
+          },
+        },
+        required: ["project", "files"],
       },
     },
   },
@@ -713,6 +775,214 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "create_agent",
+      description:
+        "Create a new internal worker agent in the Nexus Agent Foundry. Use this when the user asks you to create an agent ('create a developer agent that can build websites'). The agent is persisted and can be run later with run_agent.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Human-readable agent name, e.g. 'Developer Agent'",
+          },
+          purpose: {
+            type: "string",
+            description: "One-line description of what the agent does",
+          },
+          role: {
+            type: "string",
+            description:
+              "The agent's role, e.g. 'Builds React/Next.js applications'",
+          },
+          systemInstructions: {
+            type: "string",
+            description: "Detailed system prompt body for the agent",
+          },
+          model: {
+            type: "string",
+            description:
+              "Model intent: 'agent', 'fast', 'code', or an explicit Ollama model name",
+          },
+          tools: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Tool names this agent may call (e.g. ['web_search', 'run_code', 'write_file'])",
+          },
+          memory: {
+            type: "boolean",
+            description:
+              "Whether to inject persistent memory context (default true)",
+          },
+          capabilities: {
+            type: "array",
+            items: { type: "string" },
+            description: "Free-form capability tags",
+          },
+          executionRules: {
+            type: "string",
+            description: "Safety / behavior rules for the agent",
+          },
+          workflow: {
+            type: "string",
+            description: "How the agent sequences its work",
+          },
+        },
+        required: ["name", "purpose"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_agents",
+      description:
+        "List all internal worker agents in the Nexus Agent Foundry with their status, purpose, and granted tools. Use when the user asks what agents exist.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "inspect_agent",
+      description:
+        "Show the full definition of a single internal worker agent, including its system instructions, model, tools, capabilities, execution rules, and workflow.",
+      parameters: {
+        type: "object",
+        properties: { id: { type: "string", description: "The agent id" } },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "run_agent",
+      description:
+        "Run an internal worker agent on a task. The agent executes inside Nexus's own loop with its granted tools and returns a report. Use when the user asks an agent to do something ('developer agent, build me a portfolio website').",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The agent id to run" },
+          task: { type: "string", description: "The task to give the agent" },
+        },
+        required: ["id", "task"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "test_agent",
+      description:
+        "Test an internal worker agent on a sample task without persisting anything. Use when the user wants to try an agent before committing to it.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The agent id to test" },
+          task: { type: "string", description: "The sample task" },
+        },
+        required: ["id", "task"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "update_agent",
+      description:
+        "Update an existing internal worker agent's definition (name, purpose, role, instructions, model, tools, memory, capabilities, execution rules, workflow, status).",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The agent id to update" },
+          name: { type: "string" },
+          purpose: { type: "string" },
+          role: { type: "string" },
+          systemInstructions: { type: "string" },
+          model: { type: "string" },
+          tools: { type: "array", items: { type: "string" } },
+          memory: { type: "boolean" },
+          capabilities: { type: "array", items: { type: "string" } },
+          executionRules: { type: "string" },
+          workflow: { type: "string" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_agent",
+      description:
+        "Permanently delete an internal worker agent from the Nexus Agent Foundry.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The agent id to delete" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "pause_agent",
+      description:
+        "Pause an internal worker agent so it cannot be run until resumed. Use when the user wants to disable an agent without deleting it.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The agent id to pause" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "resume_agent",
+      description:
+        "Resume a paused internal worker agent so it can be run again.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "The agent id to resume" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "combine_agents",
+      description:
+        "Create a manager agent that coordinates a team of existing internal worker agents. The manager delegates sub-tasks to its team members via run_agent and consolidates the results. Use when the user wants to combine agents or build a team ('create a manager agent for my developer, QA, and DevOps agents').",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Name for the manager agent" },
+          purpose: {
+            type: "string",
+            description: "What the manager coordinates",
+          },
+          memberIds: {
+            type: "array",
+            items: { type: "string" },
+            description: "Agent ids of the team members to coordinate",
+          },
+        },
+        required: ["memberIds"],
+      },
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -729,6 +999,23 @@ function resolveInRoot(filename: string): string {
 
 async function ensureRoot() {
   await fs.mkdir(FILES_ROOT, { recursive: true });
+}
+
+function optionalString(v: unknown): string | undefined {
+  return v ? String(v) : undefined;
+}
+
+interface ProjectFileInput {
+  filename?: unknown;
+  content?: unknown;
+}
+
+function resolveInProject(projectRoot: string, filename: string): string {
+  const resolved = path.resolve(projectRoot, filename);
+  if (resolved !== projectRoot && !resolved.startsWith(`${projectRoot}${path.sep}`)) {
+    throw new Error("Project file path escapes the approved project folder.");
+  }
+  return resolved;
 }
 
 export async function executeTool(
@@ -853,6 +1140,33 @@ export async function executeTool(
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       await fs.writeFile(filePath, String(args.content ?? ""), "utf-8");
       return `Wrote ${filePath}`;
+    }
+
+    case "write_project_files": {
+      const project = String(args.project || "").trim();
+      const rawFiles = Array.isArray(args.files)
+        ? (args.files as ProjectFileInput[])
+        : [];
+      if (!project) return "write_project_files needs a project folder.";
+      if (rawFiles.length === 0 || rawFiles.length > 30) {
+        return "write_project_files needs between 1 and 30 files.";
+      }
+
+      await ensureRoot();
+      const projectRoot = resolveInRoot(project);
+      const files = rawFiles.map((file) => {
+        const filename = String(file.filename || "").trim();
+        const content = String(file.content ?? "");
+        if (!filename) throw new Error("Each project file needs a filename.");
+        if (content.length > 1_000_000) {
+          throw new Error(`Project file "${filename}" exceeds the 1 MB limit.`);
+        }
+        return { filename, content, path: resolveInProject(projectRoot, filename) };
+      });
+
+      await Promise.all(files.map((file) => fs.mkdir(path.dirname(file.path), { recursive: true })));
+      await Promise.all(files.map((file) => fs.writeFile(file.path, file.content, "utf-8")));
+      return `Created ${files.length} file(s) in ${projectRoot}: ${files.map((file) => file.filename).join(", ")}`;
     }
 
     case "list_files": {
@@ -1104,7 +1418,7 @@ export async function executeTool(
 
     case "format_task_plan": {
       const steps = Array.isArray(args.steps)
-        ? args.steps.map((s) => String(s))
+        ? args.steps.map((s: string) => String(s))
         : [];
       if (steps.length === 0) return "format_task_plan needs a steps array.";
       // Store the plan as an episode so it can be recalled in a future session.
@@ -1118,6 +1432,98 @@ export async function executeTool(
         // non-fatal — the plan is still returned to the user
       }
       return plan;
+    }
+
+    case "create_agent": {
+      const agent = createAgentFromInput({
+        name: String(args.name || "Untitled Agent"),
+        purpose: String(args.purpose || ""),
+        role: String(args.role || "assistant"),
+        systemInstructions: String(args.systemInstructions || ""),
+        model: String(args.model || "agent"),
+        tools: args.tools ? (args.tools as string[]) : undefined,
+        memory: args.memory !== false,
+        capabilities: args.capabilities
+          ? (args.capabilities as string[])
+          : undefined,
+        executionRules: String(args.executionRules || ""),
+        workflow: String(args.workflow || ""),
+      });
+      return JSON.stringify(agent);
+    }
+
+    case "list_agents": {
+      return JSON.stringify(listAgentSummaries());
+    }
+
+    case "inspect_agent": {
+      const id = String(args.id || "");
+      const agent = getAgent(id);
+      return agent ? JSON.stringify(agent) : `Agent "${id}" not found.`;
+    }
+
+    case "run_agent": {
+      const id = String(args.id || "");
+      const task = String(args.task || "");
+      if (!id || !task) return "run_agent needs id and task.";
+      const result = await runAgent(id, task);
+      return JSON.stringify(result);
+    }
+
+    case "test_agent": {
+      const id = String(args.id || "");
+      const task = String(args.task || "");
+      if (!id || !task) return "test_agent needs id and task.";
+      const result = await testAgent(id, task);
+      return JSON.stringify(result);
+    }
+
+    case "update_agent": {
+      const id = String(args.id || "");
+      const updated = updateAgent(id, {
+        name: optionalString(args.name),
+        purpose: optionalString(args.purpose),
+        role: optionalString(args.role),
+        systemInstructions: optionalString(args.systemInstructions),
+        model: optionalString(args.model),
+        tools: args.tools ? (args.tools as string[]) : undefined,
+        memory: args.memory !== false,
+        capabilities: args.capabilities
+          ? (args.capabilities as string[])
+          : undefined,
+        executionRules: optionalString(args.executionRules),
+        workflow: optionalString(args.workflow),
+      });
+      if (!updated) return `Agent "${id}" not found.`;
+      return JSON.stringify(updated);
+    }
+
+    case "delete_agent": {
+      const removed = deleteAgent(String(args.id || ""));
+      return removed
+        ? `Agent "${args.id}" deleted.`
+        : `Agent "${args.id}" not found.`;
+    }
+
+    case "pause_agent": {
+      return setAgentStatus(String(args.id || ""), "paused")
+        ? `Agent "${args.id}" paused.`
+        : `Agent "${args.id}" not found.`;
+    }
+
+    case "resume_agent": {
+      return setAgentStatus(String(args.id || ""), "active")
+        ? `Agent "${args.id}" resumed.`
+        : `Agent "${args.id}" not found.`;
+    }
+
+    case "combine_agents": {
+      const result = createManagerAgent({
+        name: String(args.name || "Manager Agent"),
+        purpose: String(args.purpose || ""),
+        memberIds: args.memberIds ? (args.memberIds as string[]) : [],
+      });
+      return JSON.stringify(result);
     }
 
     default:
