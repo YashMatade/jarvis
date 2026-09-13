@@ -2,7 +2,7 @@
 // system alerts) from the server to SSE-connected browser clients.
 // This module is Node-only; never import it from client components.
 
-export interface NexusEvent {
+export interface JarvisEvent {
   id?: string;
   type: "reminder" | "notification" | "system";
   title: string;
@@ -46,8 +46,8 @@ export function subscribeEvents(
   };
 }
 
-export function emitEvent(event: NexusEvent) {
-  const full: NexusEvent = {
+export function emitEvent(event: JarvisEvent) {
+  const full: JarvisEvent = {
     ...event,
     ts: event.ts || Date.now(),
   };

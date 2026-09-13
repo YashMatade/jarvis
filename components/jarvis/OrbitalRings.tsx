@@ -3,7 +3,7 @@
 import { useRef, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import type { LiveProfile } from "./nexusProfile";
+import type { LiveProfile } from "./jarvisProfile";
 
 interface OrbitalRingsProps {
   profile: React.MutableRefObject<LiveProfile>;

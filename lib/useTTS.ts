@@ -9,7 +9,7 @@ interface TTSOptions {
 }
 
 const STATUS_RESPONSES = {
-  waking: "Nexus is awake!",
+  waking: "Jarvis is awake!",
   sleeping: "Going to sleep mode. Call me when you need me.",
   searching: "Processing",
   processing: "Processing",

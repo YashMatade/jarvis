@@ -6,20 +6,20 @@ import * as THREE from "three";
 import EnergyCore from "./EnergyCore";
 import HexFragments from "./HexFragments";
 import VoiceWaveform from "./Voicewaveform";
-import { NexusState } from "./types";
-import type { LiveProfile } from "./nexusProfile";
+import { JarvisState } from "./types";
+import type { LiveProfile } from "./jarvisProfile";
 
-interface NexusCoreProps {
-  state: NexusState;
+interface JarvisCoreProps {
+  state: JarvisState;
   audioLevel: number;
   profile: React.MutableRefObject<LiveProfile>;
 }
 
-export default function NexusCore({
+export default function JarvisCore({
   state,
   audioLevel,
   profile,
-}: NexusCoreProps) {
+}: JarvisCoreProps) {
   const sphereRef = useRef<THREE.Group>(null);
 
   // Create materials ONCE with useMemo

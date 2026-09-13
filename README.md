@@ -1,4 +1,4 @@
-# Nexus — local voice assistant
+# Jarvis — local voice assistant
 
 A Next.js console for a fully local, voice-driven assistant powered by your own
 Ollama models. No cloud calls except whatever tools you explicitly wire up
@@ -17,20 +17,20 @@ on your machine.
 - **Tool calling** — web search, run code, read/write/list/delete files
   (jailed to one directory), and basic computer control (open apps/URLs).
 - **Structured info cards** — when the assistant researches a specific person/company/entity, it can call `show_profile_card` to present the result as a proper HUD panel (name, role, summary, facts, links) instead of a wall of spoken-style text.
-- **Persistent memory** — Nexus remembers facts about you, past tasks/decisions,
+- **Persistent memory** — Jarvis remembers facts about you, past tasks/decisions,
   and full conversation history across sessions and page reloads, stored in a
   local SQLite database (via Node's built-in `node:sqlite`, no extra deps).
 - **Reminders & proactive alerts** — set reminders ("remind me in 30 minutes"),
-  and Nexus speaks them aloud when they fire. A background scheduler also
+  and Jarvis speaks them aloud when they fire. A background scheduler also
   monitors your system (CPU, RAM, disk, battery) and proactively alerts you
   when something needs attention.
-- **macOS integration** — Nexus can read your calendar, create events and
+- **macOS integration** — Jarvis can read your calendar, create events and
   reminders in Apple's apps, control Music, read the volume, toggle dark mode,
   and knows the current time/date for context-aware greetings.
 - **Confirmation gate** — anything that touches your filesystem, runs code, or
   controls your computer pauses and asks you to approve it first, right in the
   UI, before it executes.
-- **Task orchestration** — Nexus can delegate complex multi-step work to built-in
+- **Task orchestration** — Jarvis can delegate complex multi-step work to built-in
   task agents:
   - **research_task** — investigate topics across multiple web sources and
     synthesize a structured report. Use "research the best project management
@@ -38,10 +38,10 @@ on your machine.
   - **devops_task** — run common development workflows in your project
     directory: status, diff, test, build, lint, install, commit (requires
     confirmation), log. Use "check git status" or "run the test suite".
-  - **write_report** — save a markdown report into your nexus-files directory.
+  - **write_report** — save a markdown report into your jarvis-files directory.
     Provide a filename and content to capture research findings or meeting notes.
   - **format_task_plan** — describe a complex task as a numbered list of steps.
-    Nexus stores the plan as an episode in long-term memory so you can recall
+    Jarvis stores the plan as an episode in long-term memory so you can recall
     it later.
 - **Confirmation gate** — anything that touches your filesystem, runs code, or
   controls your computer pauses and asks you to approve it first, right in the
@@ -66,6 +66,11 @@ on your machine.
 5. Open http://localhost:3000, click **hold to speak**, and talk. Chrome has
    the best Web Speech API support; Safari/Firefox support varies.
 
+When local voice is configured, `npm run dev` automatically starts Docker
+Desktop when needed, starts (or creates) the `jarvis-whisper` container, waits
+for Whisper and Ollama to be ready, then starts Next.js. It does not stop
+Whisper or Ollama when you stop the development server.
+
 ## Tool setup (optional but recommended)
 
 - **Web search**: powered by [Tavily](https://tavily.com), a hosted search
@@ -79,13 +84,13 @@ on your machine.
   the `web_search` case in `lib/tools.ts` back to hit a local SearXNG
   instance instead.
 - **Movie discovery**: say “find movies near me” or “book movie tickets.”
-  Nexus asks the browser for your location, searches nearby listings through
+  Jarvis asks the browser for your location, searches nearby listings through
   the same Tavily key, and shows official provider links. It resolves the
   coordinates to a suggested city via OpenStreetMap, then asks you to confirm
   or edit that city before searching. It does not store the location, buy
   tickets, store payment details, or submit checkout forms.
 - **Files**: the `read_file`/`write_file`/`list_files`/`delete_file` tools are
-  jailed to `NEXUS_FILES_DIR` (defaults to `~/nexus-files`). Nothing outside
+  jailed to `JARVIS_FILES_DIR` (defaults to `~/jarvis-files`). Nothing outside
   that directory is reachable — this is enforced in `lib/tools.ts`, not just
   suggested to the model.
 - **Run code / control computer**: work out of the box using your local shell,
@@ -111,6 +116,21 @@ servers in most browsers — it's not fully local. To go 100% offline:
 Both are drop-in replacements for the `listen()`/`speak()` functions in
 `lib/useSpeech.ts` — same interface, different implementation underneath.
 
+### Local voice pipeline (implemented)
+
+Jarvis now includes a local Whisper-compatible STT path and a Piper TTS path.
+Copy the voice settings from `.env.example` into `.env.local`, then provide:
+
+- a local Whisper server with an OpenAI-compatible
+  `/v1/audio/transcriptions` endpoint;
+- the `piper` executable; and
+- a local Piper `.onnx` voice model.
+
+Set `NEXT_PUBLIC_JARVIS_STT_PROVIDER=whisper` to record microphone utterances
+in the browser and send them only to `WHISPER_API_URL`. Set
+`JARVIS_TTS_PROVIDER=piper` to synthesize response audio through Piper. Set
+either provider back to `browser` or `edge` to use the existing fallback.
+
 ## Project structure
 
 ```
@@ -132,42 +152,42 @@ lib/
 
 ## Persistent memory
 
-Nexus keeps three kinds of long-term memory in a local SQLite database at
-`NEXUS_MEMORY_DIR` (defaults to `~/nexus-memory/nexus.db`):
+Jarvis keeps three kinds of long-term memory in a local SQLite database at
+`JARVIS_MEMORY_DIR` (defaults to `~/jarvis-memory/jarvis.db`):
 
 - **Facts** — stable things it learns about you ("the user prefers dark mode").
-  Nexus calls `remember_fact` when you share personal info or preferences.
+  Jarvis calls `remember_fact` when you share personal info or preferences.
 - **Episodes** — records of significant tasks/decisions ("deployed the app on
-  June 1st"). Nexus calls `remember_task` after meaningful work.
+  June 1st"). Jarvis calls `remember_task` after meaningful work.
 - **Conversations** — full message history, grouped by conversation, so the
   chat survives page reloads. Each browser session keeps a stable conversation
   id in `localStorage` and restores it on load.
 
-Relevant memories are injected into the system prompt each turn so Nexus can
+Relevant memories are injected into the system prompt each turn so Jarvis can
 personalize its replies. You can also ask it directly: "what do you remember
 about me?" (`list_memories`), "remember that..." (`remember_fact`), or "forget
 that" (`forget_memory`).
 
 ## Reminders & proactive alerts
 
-Nexus runs a lightweight scheduler on the server (started automatically when a
+Jarvis runs a lightweight scheduler on the server (started automatically when a
 client connects). It:
 
-- **Fires reminders** — "remind me in 15 minutes to call the bank" → Nexus
+- **Fires reminders** — "remind me in 15 minutes to call the bank" → Jarvis
   stores it and speaks it aloud at the appointed time.
 - **Repeats reminders** — pass a `repeat_minutes` to have it re-arm itself.
 - **Monitors system health** — every 90s it checks CPU, RAM, disk, and battery,
   and pushes a spoken alert + HUD card the first time a threshold is crossed
   (high CPU/RAM/disk usage, low battery).
 - **Pushes via SSE** — the browser keeps a Server-Sent Events connection to
-  `/api/events` open so proactive alerts arrive even while Nexus is idle.
+  `/api/events` open so proactive alerts arrive even while Jarvis is idle.
 
-Try it: say _"remind me in 30 seconds to drink water"_ — Nexus will interrupt
+Try it: say _"remind me in 30 seconds to drink water"_ — Jarvis will interrupt
 its listening loop, speak the reminder aloud, and show a HUD card.
 
 ## macOS integration
 
-Nexus can control native macOS apps through AppleScript (via `osascript`). These
+Jarvis can control native macOS apps through AppleScript (via `osascript`). These
 tools are exposed to the agent and require **one-time macOS automation
 permission** (System Settings → Privacy & Security → Automation) the first time
 they're used:
@@ -183,7 +203,7 @@ they're used:
   light mode, requires confirmation), `system_volume` (get/set, set requires
   confirmation).
 
-Nexus also injects **current situation context** into every prompt: today's
+Jarvis also injects **current situation context** into every prompt: today's
 date/time and any pending reminders — so "good morning" becomes a personalized
 greeting with real awareness.
 

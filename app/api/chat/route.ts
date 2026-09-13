@@ -8,7 +8,7 @@ import {
   loadConversation,
   listConversations,
 } from "@/lib/memory";
-import { findAgentInvocation, runAgent } from "@/lib/agents";
+import { findAgentInvocation, runAgent, resumeAgentLoop } from "@/lib/agents";
 
 export const runtime = "nodejs";
 
@@ -35,6 +35,15 @@ function chooseModel(messages: OllamaMessage[]): string {
 // stays clean and the memory context is recomputed each turn.
 function stripSystem(messages: OllamaMessage[]): OllamaMessage[] {
   return messages.filter((m) => m.role !== "system");
+}
+
+function isAwaitingAgentReply(messages: OllamaMessage[]): boolean {
+  const lastAssistant = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant" && message.content);
+  // A discovery reply can put example options after its one question, so the
+  // question mark is not necessarily its final character.
+  return Boolean(lastAssistant?.content.includes("?"));
 }
 
 export async function POST(req: NextRequest) {
@@ -71,7 +80,13 @@ export async function POST(req: NextRequest) {
         )
       : requestedAgent
         ? await runAgent(requestedAgent.agent.id, requestedAgent.task)
-        : await runAgentLoop(messages, model);
+        : agentContext
+          ? await resumeAgentLoop(
+              agentContext.agentId,
+              agentContext.task,
+              messages,
+            )
+          : await runAgentLoop(messages, model);
 
     const clientMessages = stripSystem(result.messages);
 
@@ -88,12 +103,15 @@ export async function POST(req: NextRequest) {
       messages: clientMessages,
       model,
       conversationId,
-      ...(result.status === "needs_confirmation" && result.agentContext
+      ...(workerRun && result.agentContext
         ? { agentContext: result.agentContext }
         : {}),
       ...(workerRun ? { agentRun: true } : {}),
-      ...(result.status === "needs_confirmation" && workerRun
+      ...(workerRun
         ? { workerMessages: clientMessages }
+        : {}),
+      ...(workerRun && result.status === "done"
+        ? { awaitingAgentReply: isAwaitingAgentReply(clientMessages) }
         : {}),
     });
   } catch (err) {

@@ -50,17 +50,17 @@ const exec = promisify(execCb);
 // ---------------------------------------------------------------------------
 
 // Everything the "files" tool touches is jailed to this directory.
-// Change via .env.local: NEXUS_FILES_DIR=/absolute/path
+// Change via .env.local: JARVIS_FILES_DIR=/absolute/path
 const FILES_ROOT = path.resolve(
   /*turbopackIgnore: true*/
-  process.env.NEXUS_FILES_DIR || path.join(os.homedir(), "nexus-files"),
+  process.env.JARVIS_FILES_DIR || path.join(os.homedir(), "jarvis-files"),
 );
 
 // Opt-in convenience mode for trusted generated projects. It applies only to
 // create/update operations that are already jailed to FILES_ROOT; destructive
 // actions and code execution always remain confirmation-gated.
 const AUTO_APPROVE_FILE_WRITES =
-  process.env.NEXUS_AUTO_APPROVE_FILE_WRITES === "true";
+  process.env.JARVIS_AUTO_APPROVE_FILE_WRITES === "true";
 
 // Hosted web search via Tavily (https://tavily.com) — built for LLM agent
 // tool calls, free tier is 1,000 searches/month, no card required.
@@ -184,7 +184,7 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
         properties: {
           filename: {
             type: "string",
-            description: "Path relative to the nexus-files directory",
+            description: "Path relative to the jarvis-files directory",
           },
         },
         required: ["filename"],
@@ -201,7 +201,7 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
         properties: {
           filename: {
             type: "string",
-            description: "Path relative to the nexus-files directory",
+            description: "Path relative to the jarvis-files directory",
           },
           content: { type: "string", description: "Content to write" },
         },
@@ -214,14 +214,14 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
     function: {
       name: "write_project_files",
       description:
-        `Create or update all files for one project in a single batch. Every file is confined to one project folder inside the Nexus files directory. Use this instead of repeated write_file calls when building a website or other multi-file project.${AUTO_APPROVE_FILE_WRITES ? " Trusted workspace mode is enabled, so these jailed file writes execute automatically." : " Requires one user confirmation for the entire listed batch."}`,
+        `Create or update all files for one project in a single batch. Every file is confined to one project folder inside the Jarvis files directory. Use this instead of repeated write_file calls when building a website or other multi-file project.${AUTO_APPROVE_FILE_WRITES ? " Trusted workspace mode is enabled, so these jailed file writes execute automatically." : " Requires one user confirmation for the entire listed batch."}`,
       parameters: {
         type: "object",
         properties: {
           project: {
             type: "string",
             description:
-              "Project folder relative to the Nexus files directory, e.g. 'portfolio'",
+              "Project folder relative to the Jarvis files directory, e.g. 'portfolio'",
           },
           files: {
             type: "array",
@@ -242,6 +242,28 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
           },
         },
         required: ["project", "files"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "show_website_preview",
+      description:
+        "Show a generated website directly in the Jarvis interface. Call this after creating a website project with write_project_files. The project must contain index.html.",
+      parameters: {
+        type: "object",
+        properties: {
+          project: {
+            type: "string",
+            description: "Project folder relative to the Jarvis files directory",
+          },
+          title: {
+            type: "string",
+            description: "Short title for the website preview",
+          },
+        },
+        required: ["project"],
       },
     },
   },
@@ -271,7 +293,7 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
         properties: {
           filename: {
             type: "string",
-            description: "Path relative to the nexus-files directory",
+            description: "Path relative to the jarvis-files directory",
           },
         },
         required: ["filename"],
@@ -451,7 +473,7 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
     function: {
       name: "set_reminder",
       description:
-        "Set a reminder that Nexus will fire at the specified time and speak aloud. Use for scheduling future tasks, appointments, or notifications. The time is relative to now unless an ISO date is given.",
+        "Set a reminder that Jarvis will fire at the specified time and speak aloud. Use for scheduling future tasks, appointments, or notifications. The time is relative to now unless an ISO date is given.",
       parameters: {
         type: "object",
         properties: {
@@ -738,14 +760,14 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
     function: {
       name: "write_report",
       description:
-        "Write a markdown/text report into the user's nexus-files directory (jailed, same as write_file). Use this to save research findings, meeting notes, or any structured output to disk. Requires confirmation before it runs.",
+        "Write a markdown/text report into the user's jarvis-files directory (jailed, same as write_file). Use this to save research findings, meeting notes, or any structured output to disk. Requires confirmation before it runs.",
       parameters: {
         type: "object",
         properties: {
           filename: {
             type: "string",
             description:
-              "Relative path inside nexus-files, e.g. 'notes/meeting.md'",
+              "Relative path inside jarvis-files, e.g. 'notes/meeting.md'",
           },
           content: {
             type: "string",
@@ -780,7 +802,7 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
     function: {
       name: "create_agent",
       description:
-        "Create a new internal worker agent in the Nexus Agent Foundry. Use this when the user asks you to create an agent ('create a developer agent that can build websites'). The agent is persisted and can be run later with run_agent.",
+        "Create a new internal worker agent in the Jarvis Agent Foundry. Use this when the user asks you to create an agent ('create a developer agent that can build websites'). The agent is persisted and can be run later with run_agent.",
       parameters: {
         type: "object",
         properties: {
@@ -840,7 +862,7 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
     function: {
       name: "list_agents",
       description:
-        "List all internal worker agents in the Nexus Agent Foundry with their status, purpose, and granted tools. Use when the user asks what agents exist.",
+        "List all internal worker agents in the Jarvis Agent Foundry with their status, purpose, and granted tools. Use when the user asks what agents exist.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -862,7 +884,7 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
     function: {
       name: "run_agent",
       description:
-        "Run an internal worker agent on a task. The agent executes inside Nexus's own loop with its granted tools and returns a report. Use when the user asks an agent to do something ('developer agent, build me a portfolio website').",
+        "Run an internal worker agent on a task. The agent executes inside Jarvis's own loop with its granted tools and returns a report. Use when the user asks an agent to do something ('developer agent, build me a portfolio website').",
       parameters: {
         type: "object",
         properties: {
@@ -919,7 +941,7 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
     function: {
       name: "delete_agent",
       description:
-        "Permanently delete an internal worker agent from the Nexus Agent Foundry.",
+        "Permanently delete an internal worker agent from the Jarvis Agent Foundry.",
       parameters: {
         type: "object",
         properties: {
@@ -992,7 +1014,7 @@ export const TOOL_DEFINITIONS: OllamaTool[] = [
 function resolveInRoot(filename: string): string {
   const resolved = path.resolve(FILES_ROOT, filename);
   if (!resolved.startsWith(FILES_ROOT)) {
-    throw new Error("Path escapes the allowed nexus-files directory.");
+    throw new Error("Path escapes the allowed jarvis-files directory.");
   }
   return resolved;
 }
@@ -1167,6 +1189,22 @@ export async function executeTool(
       await Promise.all(files.map((file) => fs.mkdir(path.dirname(file.path), { recursive: true })));
       await Promise.all(files.map((file) => fs.writeFile(file.path, file.content, "utf-8")));
       return `Created ${files.length} file(s) in ${projectRoot}: ${files.map((file) => file.filename).join(", ")}`;
+    }
+
+    case "show_website_preview": {
+      const project = String(args.project || "").trim();
+      if (!project) return "show_website_preview needs a project folder.";
+      const projectRoot = resolveInRoot(project);
+      const indexPath = resolveInProject(projectRoot, "index.html");
+      try {
+        await fs.access(indexPath);
+      } catch {
+        return `No index.html found for project "${project}".`;
+      }
+      return JSON.stringify({
+        url: `/api/site/${encodeURIComponent(project)}`,
+        title: String(args.title || project),
+      });
     }
 
     case "list_files": {

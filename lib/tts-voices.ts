@@ -4,11 +4,11 @@ export interface TTSVoice {
   description: string;
 }
 
-export const NEXUS_VOICES: TTSVoice[] = [
+export const JARVIS_VOICES: TTSVoice[] = [
   {
     name: "Ryan",
     id: "en-GB-RyanNeural",
-    description: "British male - Primary NEXUS voice",
+    description: "British male - Primary JARVIS voice",
   },
   {
     name: "Thomas",

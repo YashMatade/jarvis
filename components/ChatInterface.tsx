@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSpeech } from "@/lib/useSpeech";
+import { useWhisperSpeech } from "@/lib/useWhisperSpeech";
 import { useTTS } from "@/lib/useTTS";
 import {
   voiceStartedListening,
@@ -13,7 +14,7 @@ import {
 } from "@/lib/voice";
 import { errMsg } from "@/lib/errors";
 import type { OllamaToolCall } from "@/lib/ollama";
-import NexusSceneClient from "./nexus/NexusSceneClient";
+import JarvisSceneClient from "./jarvis/JarvisSceneClient";
 import HudCardStack from "./hud/Hudcardstack";
 import { extractHudCards } from "./hud/Extracthudcards";
 import type { HudCard } from "./hud/Types";
@@ -50,10 +51,11 @@ interface ChatApiResponse {
   agentRun?: boolean;
   messages?: Msg[];
   workerMessages?: Msg[];
+  awaitingAgentReply?: boolean;
   uiCards?: ProfileCardData[];
 }
 
-type NexusState = "sleeping" | "idle" | "listening" | "thinking" | "speaking";
+type JarvisState = "sleeping" | "idle" | "listening" | "thinking" | "speaking";
 
 // Finds the most recently appended assistant message with content.
 // (`Array.prototype.find` returns the FIRST match, which is wrong here —
@@ -184,18 +186,18 @@ function AnswerBriefing({ text }: { text: string }) {
 }
 
 // Each browser session gets a stable conversation id (kept in localStorage) so
-// Nexus can persist and restore the conversation across page reloads.
+// Jarvis can persist and restore the conversation across page reloads.
 function getOrCreateConversationId(): string {
   if (typeof window === "undefined") return `conv-${Date.now()}`;
-  const existing = localStorage.getItem("nexus-conversation-id");
+  const existing = localStorage.getItem("jarvis-conversation-id");
   if (existing) return existing;
   const id = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  localStorage.setItem("nexus-conversation-id", id);
+  localStorage.setItem("jarvis-conversation-id", id);
   return id;
 }
 
 export default function ChatInterface() {
-  const [nexusState, setNexusState] = useState<NexusState>("sleeping");
+  const [jarvisState, setJarvisState] = useState<JarvisState>("sleeping");
   const [subtitle, setSubtitle] = useState("");
   const [showChat, setShowChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -209,10 +211,11 @@ export default function ChatInterface() {
 
   const messagesRef = useRef<Msg[]>([]);
   const pendingWorkerMessagesRef = useRef<Msg[] | null>(null);
+  const activeAgentContextRef = useRef<AgentContext | null>(null);
   const activeAgentDisplayHistoryRef = useRef<Msg[] | null>(null);
   const subtitleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const stateRef = useRef<NexusState>("sleeping");
+  const stateRef = useRef<JarvisState>("sleeping");
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const subtitlePanelRef = useRef<HTMLDivElement | null>(null);
   const pendingSearchCardIdRef = useRef<string | null>(null);
@@ -238,8 +241,8 @@ export default function ChatInterface() {
   }, [messages]);
 
   useEffect(() => {
-    stateRef.current = nexusState;
-  }, [nexusState]);
+    stateRef.current = jarvisState;
+  }, [jarvisState]);
 
   // Restore the persisted conversation for this session on mount.
   useEffect(() => {
@@ -285,8 +288,18 @@ export default function ChatInterface() {
     return () => clearInterval(interval);
   }, []);
 
-  const { startListening, stopListening, listening, supported, audioLevel } =
-    useSpeech();
+  const browserSpeech = useSpeech();
+  const whisperSpeech = useWhisperSpeech();
+  const {
+    startListening,
+    stopListening,
+    listening,
+    supported,
+    audioLevel,
+  } =
+    process.env.NEXT_PUBLIC_JARVIS_STT_PROVIDER === "whisper"
+      ? whisperSpeech
+      : browserSpeech;
   const { speak: ttsSpeak, speakStatus } = useTTS();
 
   // Show subtitle with auto-clear
@@ -331,10 +344,10 @@ export default function ChatInterface() {
       resolveToolCall?: { approved: boolean },
       agentContext?: AgentContext | null,
     ): Promise<void> => {
-      // Do not let recognition consume Nexus's own status/final speech.
+      // Do not let recognition consume Jarvis's own status/final speech.
       // It is restarted explicitly once playback completes.
       stopListening();
-      setNexusState("thinking");
+      setJarvisState("thinking");
       showSubtitle("Processing...");
 
       const latestUserText = [...history]
@@ -385,10 +398,19 @@ export default function ChatInterface() {
           setMessages(displayMessages);
           messagesRef.current = displayMessages;
 
-          if (data.status === "needs_confirmation" && data.workerMessages) {
+          if (data.agentRun && data.workerMessages && data.agentContext) {
             pendingWorkerMessagesRef.current = data.workerMessages;
+            const continuesAgentRun =
+              data.awaitingAgentReply || data.status === "needs_confirmation";
+            activeAgentContextRef.current = continuesAgentRun
+              ? data.agentContext
+              : null;
+            if (!continuesAgentRun) {
+              activeAgentDisplayHistoryRef.current = null;
+            }
           } else if (data.agentRun) {
             pendingWorkerMessagesRef.current = null;
+            activeAgentContextRef.current = null;
             activeAgentDisplayHistoryRef.current = null;
           }
 
@@ -415,7 +437,7 @@ export default function ChatInterface() {
         if (data.status === "needs_confirmation" && data.pendingToolCall) {
           setPending(data.pendingToolCall);
           setPendingAgentContext(data.agentContext || null);
-          setNexusState("idle");
+          setJarvisState("idle");
           showSubtitle("Confirmation required. Say approve or deny.");
           return;
         }
@@ -426,39 +448,39 @@ export default function ChatInterface() {
           const answer = spokenAnswer(assistantMsg.content);
           if (!answer) {
             stateRef.current = "idle";
-            setNexusState("idle");
+            setJarvisState("idle");
             showSubtitle("");
             closeTurnHudCards();
             resumeListening();
             return;
           }
-          setNexusState("speaking");
+          setJarvisState("speaking");
           showSubtitle(answer);
 
           await ttsSpeak(answer, {
             onEnd: () => {
               stateRef.current = "idle";
-              setNexusState("idle");
+              setJarvisState("idle");
               showSubtitle("");
               closeTurnHudCards();
               resumeListening();
             },
             onError: () => {
               stateRef.current = "idle";
-              setNexusState("idle");
+              setJarvisState("idle");
               showSubtitle("");
               closeTurnHudCards();
               resumeListening();
             },
           });
         } else {
-          setNexusState("idle");
+          setJarvisState("idle");
           showSubtitle("");
           closeTurnHudCards();
           resumeListening();
         }
       } catch (err) {
-        setNexusState("idle");
+        setJarvisState("idle");
         showSubtitle("Sorry, I encountered an error.", 2000);
         showError(errMsg(err));
         resumeListening();
@@ -499,15 +521,15 @@ export default function ChatInterface() {
       if (stateRef.current === "sleeping") {
         if (
           lower.includes("wake up") ||
-          lower.includes("hey nexus") ||
-          lower.includes("nexus")
+          lower.includes("hey jarvis") ||
+          lower.includes("jarvis")
         ) {
-          setNexusState("speaking");
+          setJarvisState("speaking");
           showSubtitle("At your service, sir.");
 
           await ttsSpeak("At your service, sir.", {
             onEnd: () => {
-              setNexusState("idle");
+              setJarvisState("idle");
               showSubtitle("");
             },
           });
@@ -541,11 +563,11 @@ export default function ChatInterface() {
             ...prompt,
             phase: "awaiting_city",
           };
-          setNexusState("speaking");
+          setJarvisState("speaking");
           showSubtitle("Tell me the city or area to search.");
           await ttsSpeak("Okay. Tell me the city or area to search.", {
             onEnd: () => {
-              setNexusState("idle");
+              setJarvisState("idle");
               showSubtitle("");
               resumeListening();
             },
@@ -571,16 +593,16 @@ export default function ChatInterface() {
         setHudCards([]);
         turnHudCardIdsRef.current.clear();
         pendingSearchCardIdRef.current = null;
-        setNexusState("speaking");
+        setJarvisState("speaking");
         showSubtitle("Closing the panel.");
         await ttsSpeak("Closing the panel.", {
           onEnd: () => {
-            setNexusState("idle");
+            setJarvisState("idle");
             showSubtitle("");
           },
 
           onError: () => {
-            setNexusState("idle");
+            setJarvisState("idle");
             showSubtitle("");
           },
         });
@@ -590,16 +612,16 @@ export default function ChatInterface() {
       // Sleep command
       if (
         lower.includes("go to sleep") ||
-        lower.includes("sleep nexus") ||
+        lower.includes("sleep jarvis") ||
         lower.includes("goodnight")
       ) {
         stopListening();
-        setNexusState("speaking");
+        setJarvisState("speaking");
         showSubtitle("Going to sleep mode...");
 
         await ttsSpeak("Going to sleep mode. Call me when you need me, sir.", {
           onEnd: () => {
-            setNexusState("sleeping");
+            setJarvisState("sleeping");
             showSubtitle("");
             setTimeout(() => {
               startListening(latestVoiceHandlerRef.current, (interim) => {
@@ -622,14 +644,14 @@ export default function ChatInterface() {
           detectedLocation,
           phase: hasDetectedLocation ? "confirm" : "awaiting_city",
         };
-        setNexusState("speaking");
+        setJarvisState("speaking");
         const prompt = hasDetectedLocation
           ? `I found ${detectedLocation}. Should I search for movies there? Say yes, no, or tell me another city.`
           : "I could not detect your location. Tell me the city or area to search.";
         showSubtitle(prompt);
         await ttsSpeak(prompt, {
           onEnd: () => {
-            setNexusState("idle");
+            setJarvisState("idle");
             showSubtitle("");
             resumeListening();
           },
@@ -646,6 +668,10 @@ export default function ChatInterface() {
       ];
       setMessages(next);
       messagesRef.current = next;
+
+      if (activeAgentContextRef.current) {
+        activeAgentDisplayHistoryRef.current = next;
+      }
 
       // Open feedback immediately for an explicit search request. This is
       // independent of the model's eventual wording/tool choice, so the HUD
@@ -672,7 +698,13 @@ export default function ChatInterface() {
         );
       }
 
-      await callAssistant(next);
+      const activeAgentContext = activeAgentContextRef.current;
+      const workerHistory = pendingWorkerMessagesRef.current;
+      const requestHistory =
+        activeAgentContext && workerHistory
+          ? [...workerHistory, { role: "user" as const, content: requestText }]
+          : next;
+      await callAssistant(requestHistory, undefined, activeAgentContext);
     },
     [
       ttsSpeak,
@@ -739,7 +771,7 @@ export default function ChatInterface() {
   }, []);
 
   // Handle proactive events from the server (reminders, system alerts) that
-  // arrive via SSE. Only speaks when Nexus is idle; if it's mid-response or
+  // arrive via SSE. Only speaks when Jarvis is idle; if it's mid-response or
   // sleeping, the event is shown as a card + subtitle so nothing is lost.
   const handleProactiveEvent = useCallback(
     async (event: {
@@ -749,7 +781,7 @@ export default function ChatInterface() {
       reminderId?: number;
     }) => {
       const body = (event.body || "").trim();
-      const title = (event.title || "Nexus").trim();
+      const title = (event.title || "Jarvis").trim();
       if (!body) return;
 
       const cardId = `proactive-${Date.now()}`;
@@ -768,17 +800,17 @@ export default function ChatInterface() {
 
       showSubtitle(body);
       if (stateRef.current === "idle") {
-        setNexusState("speaking");
+        setJarvisState("speaking");
         await ttsSpeak(body, {
           onEnd: () => {
             stateRef.current = "idle";
-            setNexusState("idle");
+            setJarvisState("idle");
             showSubtitle("");
             resumeListening();
           },
           onError: () => {
             stateRef.current = "idle";
-            setNexusState("idle");
+            setJarvisState("idle");
             showSubtitle("");
             resumeListening();
           },
@@ -864,17 +896,17 @@ export default function ChatInterface() {
         <div className="flex items-center justify-between px-6 py-4">
           <div className="flex items-center gap-4">
             <h1 className="font-mono font-bold text-lg tracking-[0.4em] text-cyan">
-              NEXUS
+              JARVIS
             </h1>
             <span
               className={`w-1.5 h-1.5 rounded-full ${
-                nexusState === "sleeping"
+                jarvisState === "sleeping"
                   ? "bg-cyan/20"
                   : "bg-cyan animate-pulse"
               }`}
             />
             <span className="font-mono text-[10px] text-cyan/40 tracking-[0.3em] uppercase">
-              {nexusState === "sleeping" ? "SLEEP_MODE" : "ACTIVE"}
+              {jarvisState === "sleeping" ? "SLEEP_MODE" : "ACTIVE"}
             </span>
           </div>
 
@@ -892,9 +924,9 @@ export default function ChatInterface() {
 
       {/* Main Content */}
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center">
-        {/* 3D Nexus Scene */}
+        {/* 3D Jarvis Scene */}
         <div className="w-full flex-1 relative">
-          <NexusSceneClient state={nexusState} audioLevel={audioLevel} />
+          <JarvisSceneClient state={jarvisState} audioLevel={audioLevel} />
         </div>
 
         {/* Subtitle Overlay */}
@@ -940,10 +972,10 @@ export default function ChatInterface() {
         {/* Status */}
         <div className="absolute bottom-20 left-0 right-0 flex justify-center pointer-events-none">
           <span className="font-mono text-[10px] text-cyan/40 tracking-[0.3em] uppercase">
-            {nexusState === "sleeping" && "SAY 'WAKE UP NEXUS'"}
-            {nexusState === "idle" && "LISTENING..."}
-            {nexusState === "thinking" && "Processing..."}
-            {nexusState === "speaking" && "SPEAKING..."}
+            {jarvisState === "sleeping" && "SAY 'WAKE UP JARVIS'"}
+            {jarvisState === "idle" && "LISTENING..."}
+            {jarvisState === "thinking" && "Processing..."}
+            {jarvisState === "speaking" && "SPEAKING..."}
           </span>
         </div>
 
@@ -982,7 +1014,7 @@ export default function ChatInterface() {
                       }`}
                     >
                       <span className="text-[8px] tracking-wider opacity-50 block mb-1">
-                        {m.role === "user" ? "[ YOU ]" : "[ NEXUS ]"}
+                        {m.role === "user" ? "[ YOU ]" : "[ JARVIS ]"}
                       </span>
                       {m.content}
                     </div>
@@ -1019,7 +1051,7 @@ export default function ChatInterface() {
       {/* Footer */}
       <footer className="relative z-10 border-t border-cyan/20 bg-black/40 backdrop-blur-sm px-6 py-2">
         <div className="flex justify-between items-center font-mono text-[9px] text-cyan/30 tracking-wider">
-          <span>SYS: {nexusState.toUpperCase()}</span>
+          <span>SYS: {jarvisState.toUpperCase()}</span>
           <span>VOICE: {listening ? "ACTIVE" : "STANDBY"}</span>
         </div>
       </footer>

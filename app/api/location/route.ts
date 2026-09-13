@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     const response = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=10`,
       {
-        headers: { "User-Agent": "Nexus local assistant location lookup" },
+        headers: { "User-Agent": "Jarvis local assistant location lookup" },
         signal: AbortSignal.timeout(5000),
       },
     );

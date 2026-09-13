@@ -1,8 +1,8 @@
-// Nexus Agent Foundry — internal worker-agent runtime.
+// Jarvis Agent Foundry — internal worker-agent runtime.
 //
-// The main Nexus agent (lib/agent.ts) is the central controller. This module
+// The main Jarvis agent (lib/agent.ts) is the central controller. This module
 // lets it create, configure, test, store, run, and coordinate internal worker
-// agents. Workers are NOT independent services: they run inside Nexus's own
+// agents. Workers are NOT independent services: they run inside Jarvis's own
 // tool-calling loop (runLoop in lib/agent.ts), each with its own system
 // prompt, model, and granted tool subset.
 
@@ -11,7 +11,7 @@ import { runLoop } from "./agent";
 import { AgentResult } from "./agent";
 import { TOOL_DEFINITIONS } from "./tools";
 import { createAgent, getAgent, listAgents, listAgentSummaries } from "./memory";
-import { NexusAgent } from "./types";
+import { JarvisAgent } from "./types";
 import { errMsg } from "./errors";
 
 // ---------------------------------------------------------------------------
@@ -54,11 +54,15 @@ function resolveAgentModel(model: string): string {
 }
 
 // Filter the global tool schema down to the tools this agent is granted.
-function resolveAgentTools(agent: NexusAgent): OllamaTool[] {
+function resolveAgentTools(agent: JarvisAgent): OllamaTool[] {
   const allowed = new Set(agent.tools);
   // Existing developer agents that were granted write_file can use the safer
-  // single-confirmation batch writer without needing to be recreated.
-  if (allowed.has("write_file")) allowed.add("write_project_files");
+  // single-confirmation batch writer and site preview without needing to be
+  // recreated.
+  if (allowed.has("write_file")) {
+    allowed.add("write_project_files");
+    allowed.add("show_website_preview");
+  }
   return TOOL_DEFINITIONS.filter((t) => allowed.has(t.function.name));
 }
 
@@ -66,8 +70,8 @@ function resolveAgentTools(agent: NexusAgent): OllamaTool[] {
 // Prompt building
 // ---------------------------------------------------------------------------
 
-export function buildAgentSystemPrompt(agent: NexusAgent): string {
-  return `You are the ${agent.name} — ${agent.role || agent.purpose}. You are an internal worker agent created by and operating inside Nexus, the user's personal AI assistant. You are NOT a standalone service. You work on the task assigned to you and report your results back to Nexus concisely and accurately.
+export function buildAgentSystemPrompt(agent: JarvisAgent): string {
+  return `You are the ${agent.name} — ${agent.role || agent.purpose}. You are an internal worker agent created by and operating inside Jarvis, the user's personal AI assistant. You are NOT a standalone service. You work on the task assigned to you and report your results back to Jarvis concisely and accurately.
 
 PURPOSE
 ${agent.purpose}
@@ -93,9 +97,24 @@ ${
 You may ONLY use the tools explicitly granted to you. Never attempt tools that are not listed.
 When creating a multi-file project such as a website, prefer write_project_files
 over repeated write_file calls. Put every planned file in one batch. File
-creation and updates inside the configured Nexus files directory may be
+creation and updates inside the configured Jarvis files directory may be
 auto-approved by trusted-workspace mode; never assume this permission applies
 to deletion, shell commands, package installation, Git actions, or other paths.
+
+WEBSITE DISCOVERY
+For a website request that does not already include enough detail to build,
+run this exact three-question discovery conversation. Ask exactly ONE question
+per reply and wait for the user's answer before asking the next one:
+1. "What color theme should I use?"
+2. "What content should appear?"
+3. "Do you want to add something of your own?"
+Do not ask any other discovery questions. If the user already supplied an
+answer, skip that question. Once all three are answered, say "I've collected
+the information. I'm working on it now.", build the site, then call
+show_website_preview with its project folder so the completed website appears
+directly in Jarvis. Do not tell the user to open a file path or link. If the
+user says to decide the details, choose sensible defaults and proceed.
+
 When done, give a concise final report: what you did, what the result was, and anything the user should know.`;
 }
 
@@ -110,7 +129,7 @@ export interface AgentRunContext {
 }
 
 export interface AgentInvocation {
-  agent: NexusAgent;
+  agent: JarvisAgent;
   task: string;
 }
 
@@ -248,7 +267,7 @@ const DEFAULT_TOOLS = [
 
 export function createAgentFromInput(
   input: CreateAgentInput & { id?: string },
-): { ok: boolean; agent?: NexusAgent; error?: string } {
+): { ok: boolean; agent?: JarvisAgent; error?: string } {
   const name = (input.name || "").trim();
   const purpose = (input.purpose || "").trim();
   if (!name || !purpose) {
@@ -267,7 +286,7 @@ export function createAgentFromInput(
   }
 
   const now = new Date().toISOString();
-  const agent: NexusAgent = {
+  const agent: JarvisAgent = {
     id,
     name,
     purpose,
@@ -305,7 +324,7 @@ export function createManagerAgent(input: {
   name: string;
   purpose: string;
   memberIds: string[];
-}): { ok: boolean; agent?: NexusAgent; error?: string } {
+}): { ok: boolean; agent?: JarvisAgent; error?: string } {
   const name = (input.name || "").trim() || "Manager Agent";
   const memberIds = (input.memberIds || []).filter((id) => getAgent(id));
   if (memberIds.length === 0) {
@@ -319,7 +338,7 @@ export function createManagerAgent(input: {
   const memberNames = memberIds.map((id) => getAgent(id)!.name).join(", ");
 
   const systemInstructions =
-    `You are a coordination manager for a team of Nexus internal worker agents.\n` +
+    `You are a coordination manager for a team of Jarvis internal worker agents.\n` +
     `Your team members are: ${memberNames}.\n\n` +
     `To delegate a task to a team member, call run_agent with their agent id and a clear, self-contained task description.\n` +
     `Sequence work appropriately: break the user's goal into steps, assign each step to the right member, gather their results, and present a final consolidated report.\n` +
@@ -393,7 +412,7 @@ export async function testAgent(
 export function formatAgentList(): string {
   const agents = listAgentSummaries();
   if (agents.length === 0) {
-    return "No agents created yet. Ask Nexus to create one (e.g. 'create a developer agent').";
+    return "No agents created yet. Ask Jarvis to create one (e.g. 'create a developer agent').";
   }
   return (
     `Agents (${agents.length}):\n` +
@@ -406,7 +425,7 @@ export function formatAgentList(): string {
   );
 }
 
-export function formatAgentDetail(agent: NexusAgent): string {
+export function formatAgentDetail(agent: JarvisAgent): string {
   return [
     `Name: ${agent.name}`,
     `ID: ${agent.id}`,

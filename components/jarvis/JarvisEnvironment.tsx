@@ -3,13 +3,13 @@
 import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import type { LiveProfile } from "./nexusProfile";
+import type { LiveProfile } from "./jarvisProfile";
 
-interface NexusEnvironmentProps {
+interface JarvisEnvironmentProps {
   profile: React.MutableRefObject<LiveProfile>;
 }
 
-export default function NexusEnvironment({ profile }: NexusEnvironmentProps) {
+export default function JarvisEnvironment({ profile }: JarvisEnvironmentProps) {
   const bgRef = useRef<THREE.Color>(null);
   const fogRef = useRef<THREE.Fog>(null);
   const lightRef = useRef<THREE.AmbientLight>(null);

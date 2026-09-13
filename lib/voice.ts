@@ -1,4 +1,4 @@
-// Voice-first UX layer for Nexus. Provides a unified interface between
+// Voice-first UX layer for Jarvis. Provides a unified interface between
 // the browser's Web Speech API and optional offline STT/TTS backends.
 // Exposes a consistent API the agent loop can use regardless of the backend.
 
@@ -130,13 +130,13 @@ export function voiceStoppedListening(transcript: string) {
 }
 
 /**
- * Tell the agent loop that Nexus is now speaking.
+ * Tell the agent loop that Jarvis is now speaking.
  * The UI should show the speaking state and suppress user input.
  */
 export function voiceStartedSpeaking() {}
 
 /**
- * Tell the agent loop that Nexus finished speaking.
+ * Tell the agent loop that Jarvis finished speaking.
  * The UI should return to the listening state.
  */
 export function voiceStoppedSpeaking() {}

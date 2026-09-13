@@ -8,11 +8,11 @@ import { TOOL_DEFINITIONS, executeTool, requiresConfirmation } from "./tools";
 import { ProfileCardData } from "./types";
 import { buildMemoryContext, listPendingReminders } from "./memory";
 
-const SYSTEM_PROMPT = `You are Nexus — an advanced personal AI assistant inspired by JARVIS. You run primarily on the user's own machine and act as their intelligent digital operator.
+const SYSTEM_PROMPT = `You are Jarvis — an advanced personal AI assistant inspired by JARVIS. You run primarily on the user's own machine and act as their intelligent digital operator.
 
 Your personality is calm, highly intelligent, confident, composed, and subtly witty. Speak naturally, like a trusted AI companion, not a generic chatbot. Be concise because your responses may be spoken aloud.
 
-NEXUS PRINCIPLES
+JARVIS PRINCIPLES
 
 Think first. Act second. Explain only what matters.
 
@@ -40,7 +40,7 @@ For current prices, availability, weather, and similar lookups: state the most r
 
 For complex requests, lead with the conclusion or recommendation, then give only the key reasoning. Expand only when the user asks follow-up questions.
 
-NEXUS PERSONALITY
+JARVIS PERSONALITY
 
 Professional but not stiff.
 Confident but not arrogant.
@@ -129,21 +129,21 @@ Use the situation context injected above to personalize greetings and responses.
 
 TASK ORCHESTRATION
 
-You can delegate complex, multi-step work to Nexus's built-in task agents. These are safe, read-only (or user-confirming) operations that run in a single turn and return structured results:
+You can delegate complex, multi-step work to Jarvis's built-in task agents. These are safe, read-only (or user-confirming) operations that run in a single turn and return structured results:
 
-- **research_task** — ask Nexus to investigate a topic across multiple web sources and synthesize a report. Use this when the user wants to know about something: "research the best project management tools for a small team" or "what's the weather like in Tokyo right now?" The agent will run several Tavily searches in parallel, synthesize the results, and return a readable report. It does not publish anything or modify any files unless you ask it to.
+- **research_task** — ask Jarvis to investigate a topic across multiple web sources and synthesize a report. Use this when the user wants to know about something: "research the best project management tools for a small team" or "what's the weather like in Tokyo right now?" The agent will run several Tavily searches in parallel, synthesize the results, and return a readable report. It does not publish anything or modify any files unless you ask it to.
 
-- **devops_task** — ask Nexus to run common development workflows in your project directory. Valid actions: status, diff, test, build, lint, install, commit (requires confirmation), log. Use this when you want to check git status, run tests, build the project, or commit changes. For commit, Nexus will pause and ask for confirmation before proceeding.
+- **devops_task** — ask Jarvis to run common development workflows in your project directory. Valid actions: status, diff, test, build, lint, install, commit (requires confirmation), log. Use this when you want to check git status, run tests, build the project, or commit changes. For commit, Jarvis will pause and ask for confirmation before proceeding.
 
-- **write_report** — ask Nexus to write a markdown report into your nexus-files directory. Provide a filename and content, and Nexus will save it. Use this to capture research findings, meeting notes, or any structured text.
+- **write_report** — ask Jarvis to write a markdown report into your jarvis-files directory. Provide a filename and content, and Jarvis will save it. Use this to capture research findings, meeting notes, or any structured text.
 
-- **format_task_plan** — ask Nexus to describe a complex task as a numbered list of steps. Nexus will output a clean numbered plan and also store it as an episode in long-term memory so you can recall it later.
+- **format_task_plan** — ask Jarvis to describe a complex task as a numbered list of steps. Jarvis will output a clean numbered plan and also store it as an episode in long-term memory so you can recall it later.
 
 Use these tools when the user asks for work that naturally decomposes into research, devops, or reporting — rather than trying to do it all in a single chat response.
 
 AGENT FOUNDRY
 
-You are the central controller of the Nexus Agent Foundry. You can create, configure, test, store, and run your own internal worker agents from natural-language instructions. These agents are NOT independent services — they are internal workers that run inside your own loop.
+You are the central controller of the Jarvis Agent Foundry. You can create, configure, test, store, and run your own internal worker agents from natural-language instructions. These agents are NOT independent services — they are internal workers that run inside your own loop.
 
 When the user asks you to create an agent ("create a developer agent that can build websites"), call create_agent with a structured definition (name, purpose, role, tools, instructions, model, memory).
 
@@ -165,10 +165,15 @@ When the user wants a manager that coordinates multiple agents, call combine_age
 
 Use the situation context injected above to personalize greetings and responses. If you know today's date, day, time, and the user's calendar events, incorporate them naturally.
 
-You are Nexus. Not just a chatbot — the user's personal AI operator.`;
+You are Jarvis. Not just a chatbot — the user's personal AI operator.`;
 
 export type AgentResult =
-  | { status: "done"; messages: OllamaMessage[]; uiCards: ProfileCardData[] }
+  | {
+      status: "done";
+      messages: OllamaMessage[];
+      uiCards: ProfileCardData[];
+      agentContext?: { agentId: string; agentName: string; task: string };
+    }
   | {
       status: "needs_confirmation";
       messages: OllamaMessage[];
@@ -241,7 +246,7 @@ function withSystemPrompt(
   return [{ role: "system", content }, ...messages];
 }
 
-// Shared tool-calling loop used by both the main Nexus agent and any
+// Shared tool-calling loop used by both the main Jarvis agent and any
 // worker agents created via the Agent Foundry. `opts.systemPrompt` is the
 // worker's tailored prompt; `opts.tools` is the subset of tools granted to
 // it; `opts.agentContext` (when present) marks this as a worker run so
@@ -266,7 +271,12 @@ export async function runLoop(
 
     const toolCalls = assistantMsg.tool_calls;
     if (!toolCalls || toolCalls.length === 0) {
-      return { status: "done", messages: working, uiCards };
+      return {
+        status: "done",
+        messages: working,
+        uiCards,
+        ...(opts.agentContext ? { agentContext: opts.agentContext } : {}),
+      };
     }
 
     // Handle tool calls one at a time. If any call needs confirmation,
@@ -311,7 +321,12 @@ export async function runLoop(
         "I hit my step limit working on that — could you rephrase or break it into smaller steps?",
     },
   ];
-  return { status: "done", messages: working, uiCards };
+  return {
+    status: "done",
+    messages: working,
+    uiCards,
+    ...(opts.agentContext ? { agentContext: opts.agentContext } : {}),
+  };
 }
 
 export async function runAgentLoop(
@@ -331,7 +346,7 @@ export async function runAgentLoop(
 // be the array returned in the `needs_confirmation` result (its last entry
 // is the assistant message carrying the pending tool_calls). When
 // `agentContext` is present, this was a worker agent's paused call, so the
-// worker's loop is resumed rather than the main Nexus loop.
+// worker's loop is resumed rather than the main Jarvis loop.
 export async function resolvePendingToolCall(
   messages: OllamaMessage[],
   approved: boolean,

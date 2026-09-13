@@ -212,7 +212,7 @@ export function extractHudCards(
     }
 
     // --- Open / navigate-style tool ---
-    if (/open|navigate|browse|^url$/i.test(toolName)) {
+    if (/open|navigate|browse|preview|^url$/i.test(toolName)) {
       const url =
         (typeof parsed === "object" &&
           parsed &&

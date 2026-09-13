@@ -1,25 +1,25 @@
-// Persistent memory store for Nexus, backed by SQLite via Node's built-in
+// Persistent memory store for Jarvis, backed by SQLite via Node's built-in
 // `node:sqlite` module (available in Node 22.13+). No native compilation or
 // extra dependencies required.
 //
 // The store keeps three kinds of long-term memory:
-//   - facts:      stable things Nexus learns about the user ("birthday is...")
+//   - facts:      stable things Jarvis learns about the user ("birthday is...")
 //   - episodes:   records of past tasks/decisions ("deployed the app on...")
 //   - messages:   full conversation history, grouped into conversations
 //
-// The DB file lives at NEXUS_MEMORY_DIR (defaults to ~/nexus-memory/nexus.db).
+// The DB file lives at JARVIS_MEMORY_DIR (defaults to ~/jarvis-memory/jarvis.db).
 
 import { DatabaseSync } from "node:sqlite";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { NexusAgent, NexusAgentSummary } from "./types";
+import { JarvisAgent, JarvisAgentSummary } from "./types";
 
 const MEMORY_DIR = path.resolve(
   /*turbopackIgnore: true*/
-  process.env.NEXUS_MEMORY_DIR || path.join(os.homedir(), "nexus-memory"),
+  process.env.JARVIS_MEMORY_DIR || path.join(os.homedir(), "jarvis-memory"),
 );
-const DB_PATH = path.join(MEMORY_DIR, "nexus.db");
+const DB_PATH = path.join(MEMORY_DIR, "jarvis.db");
 
 let db: DatabaseSync | null = null;
 
@@ -316,7 +316,7 @@ export function recallEpisodes(query: string, limit = 5): Episode[] {
 // ---------------------------------------------------------------------------
 
 // Build a compact memory context block to inject into the system prompt so
-// Nexus can ground its replies in what it already knows about the user.
+// Jarvis can ground its replies in what it already knows about the user.
 export function buildMemoryContext(query: string): string {
   const facts = recallFacts(query, 8);
   const episodes = recallEpisodes(query, 4);
@@ -476,7 +476,7 @@ export function markNotificationsAcknowledged(ids: number[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// Nexus Agent Foundry — persistent agent store
+// Jarvis Agent Foundry — persistent agent store
 // ---------------------------------------------------------------------------
 
 interface AgentRow {
@@ -496,7 +496,7 @@ interface AgentRow {
   updated_at: string;
 }
 
-function rowToAgent(row: AgentRow): NexusAgent {
+function rowToAgent(row: AgentRow): JarvisAgent {
   return {
     id: row.id,
     name: row.name,
@@ -509,7 +509,7 @@ function rowToAgent(row: AgentRow): NexusAgent {
     capabilities: safeJsonArray(row.capabilities),
     executionRules: row.execution_rules,
     workflow: row.workflow,
-    status: (row.status as NexusAgent["status"]) || "active",
+    status: (row.status as JarvisAgent["status"]) || "active",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -524,7 +524,7 @@ function safeJsonArray(raw: string): string[] {
   }
 }
 
-export function createAgent(agent: NexusAgent): NexusAgent {
+export function createAgent(agent: JarvisAgent): JarvisAgent {
   const d = getDb();
   d.prepare(
     `INSERT INTO agents (
@@ -548,7 +548,7 @@ export function createAgent(agent: NexusAgent): NexusAgent {
   return getAgent(agent.id)!;
 }
 
-export function getAgent(id: string): NexusAgent | null {
+export function getAgent(id: string): JarvisAgent | null {
   const d = getDb();
   const row = d
     .prepare(`SELECT * FROM agents WHERE id = ?`)
@@ -556,7 +556,7 @@ export function getAgent(id: string): NexusAgent | null {
   return row ? rowToAgent(row) : null;
 }
 
-export function listAgents(): NexusAgent[] {
+export function listAgents(): JarvisAgent[] {
   const d = getDb();
   const rows = d
     .prepare(`SELECT * FROM agents ORDER BY updated_at DESC`)
@@ -564,7 +564,7 @@ export function listAgents(): NexusAgent[] {
   return rows.map(rowToAgent);
 }
 
-export function listAgentSummaries(): NexusAgentSummary[] {
+export function listAgentSummaries(): JarvisAgentSummary[] {
   return listAgents().map((a) => ({
     id: a.id,
     name: a.name,
@@ -578,12 +578,12 @@ export function listAgentSummaries(): NexusAgentSummary[] {
 
 export function updateAgent(
   id: string,
-  patch: Partial<Omit<NexusAgent, "id" | "createdAt">>,
-): NexusAgent | null {
+  patch: Partial<Omit<JarvisAgent, "id" | "createdAt">>,
+): JarvisAgent | null {
   const d = getDb();
   const existing = getAgent(id);
   if (!existing) return null;
-  const merged: NexusAgent = {
+  const merged: JarvisAgent = {
     ...existing,
     ...patch,
     id,
@@ -614,8 +614,8 @@ export function updateAgent(
 
 export function setAgentStatus(
   id: string,
-  status: NexusAgent["status"],
-): NexusAgent | null {
+  status: JarvisAgent["status"],
+): JarvisAgent | null {
   return updateAgent(id, { status });
 }
 

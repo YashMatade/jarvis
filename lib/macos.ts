@@ -1,4 +1,4 @@
-// macOS integration layer for Nexus. Executes native AppleScript commands via
+// macOS integration layer for Jarvis. Executes native AppleScript commands via
 // `osascript` to control Calendar, Reminders, Music, Notifications, volume,
 // and other system features. All functions return plain strings suitable for
 // tool results — failures are returned as text, never thrown.
@@ -24,7 +24,7 @@ async function runAppleScript(script: string): Promise<string> {
   // multi-line scripts that embed their own quotes.
   const tmpFile = path.join(
     os.tmpdir(),
-    `nexus-osascript-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.scpt`,
+    `jarvis-osascript-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.scpt`,
   );
   try {
     await fs.writeFile(tmpFile, script, "utf-8");
@@ -147,7 +147,7 @@ export async function getCalendarEvents(days = 1) {
 }
 
 // ---------------------------------------------------------------------------
-// Reminders (Apple's Reminders.app - separate from Nexus's internal reminders)
+// Reminders (Apple's Reminders.app - separate from Jarvis's internal reminders)
 // ---------------------------------------------------------------------------
 
 export async function createAppleReminder(options: {

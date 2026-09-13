@@ -26,13 +26,13 @@ export interface ProfileCardData {
 }
 
 // ---------------------------------------------------------------------------
-// Nexus Agent Foundry
+// Jarvis Agent Foundry
 // ---------------------------------------------------------------------------
 
-// A persistent, user-created internal worker agent. Nexus (the central
+// A persistent, user-created internal worker agent. Jarvis (the central
 // controller) creates, configures, tests, stores, and runs these agents.
-// They are NOT independent services — they run inside Nexus's own loop.
-export interface NexusAgent {
+// They are NOT independent services — they run inside Jarvis's own loop.
+export interface JarvisAgent {
   id: string; // slug, e.g. "developer-agent"
   name: string; // "Developer Agent"
   purpose: string; // one-line intent
@@ -50,11 +50,11 @@ export interface NexusAgent {
 }
 
 // A lightweight summary used for listing agents in the UI / tool results.
-export interface NexusAgentSummary {
+export interface JarvisAgentSummary {
   id: string;
   name: string;
   purpose: string;
-  status: NexusAgent["status"];
+  status: JarvisAgent["status"];
   tools: string[];
   capabilities: string[];
   updatedAt: string;

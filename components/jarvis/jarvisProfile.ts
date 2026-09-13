@@ -3,7 +3,7 @@
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { NexusProfile, NexusState, STATE_PROFILE } from "./types";
+import { JarvisProfile, JarvisState, STATE_PROFILE } from "./types";
 
 const NUMERIC_KEYS = [
   "energy",
@@ -34,7 +34,7 @@ export interface LiveProfile {
  * frame so consumers can read `.current` inside useFrame without causing
  * React re-renders.
  */
-export function useNexusProfile(state: NexusState, transitionMs = 900) {
+export function useJarvisProfile(state: JarvisState, transitionMs = 900) {
   const target = STATE_PROFILE[state];
 
   const live = useRef<LiveProfile>(
@@ -86,4 +86,4 @@ export function useNexusProfile(state: NexusState, transitionMs = 900) {
   return live;
 }
 
-export type { NexusProfile };
+export type { JarvisProfile };

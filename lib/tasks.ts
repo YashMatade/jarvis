@@ -1,10 +1,10 @@
-// Multi-step task execution for Nexus. These helpers give the agent the
+// Multi-step task execution for Jarvis. These helpers give the agent the
 // ability to do real multi-step work in a single tool call:
 //
 //  - research_task:    run several web searches in parallel, synthesize into
 //                      a structured summary, and optionally save it as a file
 //  - devops_task:      run common dev workflows (status, test, build, commit)
-//  - write_report:     write a text/markdown report into the user's nexus-files
+//  - write_report:     write a text/markdown report into the user's jarvis-files
 //
 // All functions return plain strings usable as tool results. Failures are
 // returned as text, never thrown.
@@ -19,10 +19,10 @@ const exec = promisify(execCb);
 
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY || "";
 
-// Everything written by Nexus is jailed to this directory.
+// Everything written by Jarvis is jailed to this directory.
 const FILES_ROOT = path.resolve(
   /*turbopackIgnore: true*/
-  process.env.NEXUS_FILES_DIR || path.join(os.homedir(), "nexus-files"),
+  process.env.JARVIS_FILES_DIR || path.join(os.homedir(), "jarvis-files"),
 );
 
 interface SearchResult {
@@ -246,7 +246,7 @@ export async function devopsTask(options: {
 // ---------------------------------------------------------------------------
 
 /**
- * Write a markdown/text report into the user's nexus-files directory.
+ * Write a markdown/text report into the user's jarvis-files directory.
  * Subdirectories are created as needed.
  */
 export async function writeReport(options: {
@@ -259,7 +259,7 @@ export async function writeReport(options: {
   const normalized = filename.replace(/^\/+/, "");
   const target = path.resolve(FILES_ROOT, normalized);
   if (!target.startsWith(FILES_ROOT)) {
-    return "Report path escapes the nexus-files directory.";
+    return "Report path escapes the jarvis-files directory.";
   }
 
   try {
@@ -278,7 +278,7 @@ export async function writeReport(options: {
 
 /**
  * Return a clean list of steps for a complex task. This is a convenience for
- * the model — it can describe a plan and Nexus will confirm splitting the
+ * the model — it can describe a plan and Jarvis will confirm splitting the
  * work into explicit steps. The plan itself is stored as an episode so it
  * survives across sessions.
  */

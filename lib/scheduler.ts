@@ -1,4 +1,4 @@
-// Proactive scheduler for Nexus. Runs a lightweight tick loop that:
+// Proactive scheduler for Jarvis. Runs a lightweight tick loop that:
 //   1. Fires due reminders (converted into notifications + SSE events)
 //   2. Re-arms repeating reminders
 //   3. Monitors system health and alerts on thresholds

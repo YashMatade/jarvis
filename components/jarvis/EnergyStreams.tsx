@@ -4,7 +4,7 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Line } from "@react-three/drei";
 import * as THREE from "three";
-import type { LiveProfile } from "./nexusProfile";
+import type { LiveProfile } from "./jarvisProfile";
 
 interface EnergyStreamsProps {
   profile: React.MutableRefObject<LiveProfile>;
